@@ -1,0 +1,386 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: #ffffff;
+  -webkit-tap-highlight-color: transparent;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #0f172a;
+  overflow-x: hidden;
+  position: relative;
+}
+
+#root {
+  min-height: 100%;
+}
+
+/* Font utilities */
+.font-display {
+  font-family: 'Fraunces', Georgia, 'Times New Roman', serif;
+  font-feature-settings: "ss01", "ss02";
+}
+
+/* Subtle dotted grid overlay — adds quiet texture without leaving white */
+.bg-dot-grid {
+  background-image: radial-gradient(circle, rgba(15, 23, 42, 0.06) 1px, transparent 1px);
+  background-size: 22px 22px;
+  background-position: 0 0;
+}
+
+/* Surface lembut untuk konten utama — glassy white with hairline gradient border */
+.card {
+  position: relative;
+  background: #ffffff;
+  border-radius: 1.5rem;
+  box-shadow:
+    0 1px 1px rgba(15, 23, 42, 0.04),
+    0 12px 32px -12px rgba(15, 23, 42, 0.12),
+    0 24px 60px -24px rgba(99, 102, 241, 0.18);
+  isolation: isolate;
+}
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.22), rgba(236, 72, 153, 0.10) 40%, rgba(14, 165, 233, 0.18));
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Subtle accent untuk badge / chip */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Hide scrollbar utility (for horizontal carousels) */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ---------- Animations ---------- */
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out both;
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up {
+  animation: slide-up 0.45s ease-out both;
+}
+
+/* Floating blobs — slow, organic motion for background depth */
+@keyframes blob-drift-a {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  33%      { transform: translate3d(20px, -28px, 0) scale(1.06); }
+  66%      { transform: translate3d(-18px, 18px, 0) scale(0.95); }
+}
+@keyframes blob-drift-b {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50%      { transform: translate3d(-26px, 22px, 0) scale(1.08); }
+}
+@keyframes blob-drift-c {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  40%      { transform: translate3d(16px, 24px, 0) scale(0.92); }
+  80%      { transform: translate3d(-12px, -18px, 0) scale(1.04); }
+}
+.animate-blob-a { animation: blob-drift-a 14s ease-in-out infinite; }
+.animate-blob-b { animation: blob-drift-b 18s ease-in-out infinite; }
+.animate-blob-c { animation: blob-drift-c 22s ease-in-out infinite; }
+
+/* Gentle breathe for logo mark */
+@keyframes breathe {
+  0%, 100% { transform: scale(1) rotate(-6deg); }
+  50%      { transform: scale(1.04) rotate(-4deg); }
+}
+.animate-breathe {
+  animation: breathe 5.5s ease-in-out infinite;
+  transform-origin: center;
+}
+
+/* Soft shimmer sweep on gradient text */
+@keyframes gradient-pan {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+.text-gradient {
+  background-image: linear-gradient(110deg, #6366f1 0%, #8b5cf6 35%, #ec4899 70%, #6366f1 100%);
+  background-size: 220% 220%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  color: transparent;
+  animation: gradient-pan 8s ease-in-out infinite;
+}
+
+/* Sparkle float for tiny decorative dots */
+@keyframes sparkle {
+  0%, 100% { opacity: 0.35; transform: translateY(0) scale(1); }
+  50%      { opacity: 1;    transform: translateY(-4px) scale(1.15); }
+}
+.animate-sparkle { animation: sparkle 3s ease-in-out infinite; }
+.animate-sparkle-delay { animation: sparkle 3s ease-in-out infinite; animation-delay: 1.2s; }
+.animate-sparkle-delay-2 { animation: sparkle 3s ease-in-out infinite; animation-delay: 2.1s; }
+
+/* ---------- Wizard step transitions ---------- */
+@keyframes step-enter {
+  from { opacity: 0; transform: translateX(14px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes step-enter-back {
+  from { opacity: 0; transform: translateX(-14px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.animate-step-enter { animation: step-enter 0.32s ease-out both; }
+.animate-step-enter-back { animation: step-enter-back 0.32s ease-out both; }
+
+/* Progress bar fill */
+.progress-bar-fill {
+  transition: width 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* OCR scan-line animation — sweep vertikal di atas preview KTP */
+@keyframes ocr-scan {
+  0%   { transform: translateY(0);   opacity: 0.85; }
+  50%  { opacity: 1; }
+  100% { transform: translateY(100%); opacity: 0.85; }
+}
+.animate-ocr-scan {
+  animation: ocr-scan 1.6s ease-in-out infinite;
+}
+
+/* Pulse ring untuk status "scanning" */
+@keyframes pulse-ring {
+  0%   { transform: scale(0.95); opacity: 0.7; }
+  70%  { transform: scale(1.4);  opacity: 0; }
+  100% { transform: scale(1.4);  opacity: 0; }
+}
+.animate-pulse-ring {
+  animation: pulse-ring 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Gradient sweep untuk highlight step aktif di stepper */
+@keyframes gradient-sweep {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+.bg-gradient-sweep {
+  background-image: linear-gradient(110deg, #6366f1 0%, #8b5cf6 35%, #ec4899 70%, #6366f1 100%);
+  background-size: 220% 220%;
+  animation: gradient-sweep 6s ease-in-out infinite;
+}
+
+/* Drop zone hover lift */
+.dropzone {
+  transition: all 0.2s ease-out;
+}
+.dropzone:hover, .dropzone--active {
+  border-color: #6366f1;
+  background-color: rgba(99, 102, 241, 0.04);
+}
+
+/* Inline label kecil untuk nilai hasil OCR */
+.ocr-field-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+/* ============================================================
+   OKR (shadcn) theme — sama persis dengan Sistem OKR
+   Vars global (seperti :root milik Sistem OKR) agar portal
+   (driver.js, sonner) yang dirender di luar .okr-root ikut memakai.
+   ============================================================ */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --success: 142 71% 38%;
+    --success-foreground: 0 0% 100%;
+
+    --brand: 221 83% 53%;
+    --brand-foreground: 0 0% 100%;
+
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5.9% 10%;
+
+    --radius: 0.75rem;
+  }
+
+  /* Di dalam area OKR, semua border memakai warna OKR (border-border) */
+  .okr-root * {
+    border-color: hsl(var(--border));
+  }
+}
+
+/* Animasi OKR — 300ms/200ms ease-out (mengalahkan versi global HRMS) */
+.okr-root .animate-fade-in {
+  animation: okr-fade-in 300ms ease-out both;
+}
+.okr-root .animate-slide-up {
+  animation: okr-slide-up 300ms ease-out both;
+}
+.okr-root .animate-scale-in {
+  animation: okr-scale-in 200ms ease-out both;
+}
+@keyframes okr-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes okr-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes okr-scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* Onboarding tour (driver.js) overrides — match shadcn aesthetic */
+.driver-popover {
+  border-radius: 0.75rem !important;
+  border: 1px solid hsl(var(--border)) !important;
+  box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.15) !important;
+  background: hsl(var(--popover)) !important;
+  color: hsl(var(--popover-foreground)) !important;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+}
+
+.driver-popover-title {
+  font-weight: 600 !important;
+  letter-spacing: -0.025em !important;
+  font-size: 0.95rem !important;
+  color: hsl(var(--popover-foreground)) !important;
+}
+
+.driver-popover-description {
+  font-size: 0.8125rem !important;
+  color: hsl(var(--muted-foreground)) !important;
+  line-height: 1.5 !important;
+}
+
+.driver-popover-progress-text {
+  font-size: 0.75rem !important;
+  color: hsl(var(--muted-foreground)) !important;
+}
+
+.driver-popover-next-btn,
+.driver-popover-prev-btn,
+.driver-popover-close-btn {
+  border-radius: 0.5rem !important;
+  font-size: 0.8125rem !important;
+  font-weight: 500 !important;
+  padding: 0.4rem 0.75rem !important;
+  transition: background-color 150ms ease, color 150ms ease !important;
+}
+
+.driver-popover-next-btn {
+  background: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+  text-shadow: none !important;
+  border: none !important;
+}
+
+.driver-popover-next-btn:hover {
+  background: hsl(var(--primary) / 0.9) !important;
+}
+
+.driver-popover-prev-btn {
+  background: transparent !important;
+  color: hsl(var(--foreground)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  text-shadow: none !important;
+}
+
+.driver-popover-prev-btn:hover {
+  background: hsl(var(--accent)) !important;
+}
+
+.driver-popover-close-btn {
+  color: hsl(var(--muted-foreground)) !important;
+  background: transparent !important;
+  font-size: 1.1rem !important;
+  font-weight: 400 !important;
+  padding: 0 0.5rem !important;
+}
+
+.driver-popover-close-btn:hover {
+  color: hsl(var(--foreground)) !important;
+}
+
+.driver-popover-arrow-side-top.driver-popover-arrow,
+.driver-popover-arrow-side-bottom.driver-popover-arrow,
+.driver-popover-arrow-side-left.driver-popover-arrow,
+.driver-popover-arrow-side-right.driver-popover-arrow {
+  border-color: hsl(var(--popover)) !important;
+}
