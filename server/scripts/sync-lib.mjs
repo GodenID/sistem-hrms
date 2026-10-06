@@ -17,6 +17,16 @@ const repoRoot = path.resolve(here, '..', '..')
 const srcDir = path.join(repoRoot, 'functions', 'lib')
 const dstDir = path.join(repoRoot, 'server', 'src', 'gen')
 
+// Pengaman: gagal keras bila layout tidak sesuai (mis. di dalam image
+// Docker) supaya build berhenti, bukan menghasilkan image rusak.
+const { stat } = await import('node:fs/promises')
+try {
+  const st = await stat(srcDir)
+  if (!st.isDirectory()) throw new Error('bukan direktori')
+} catch {
+  throw new Error(`[sync-lib] functions/lib tidak ketemu di ${srcDir} (repoRoot=${repoRoot})`)
+}
+
 await mkdir(dstDir, { recursive: true })
 
 const files = (await readdir(srcDir)).filter((f) => f.endsWith('.js') && f !== 'core.js')
