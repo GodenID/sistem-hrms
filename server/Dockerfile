@@ -15,6 +15,9 @@ RUN npm install --omit=dev --no-audit --no-fund
 COPY server/src ./src
 COPY server/scripts ./scripts
 COPY functions /app/functions
+# Modul di /app/functions/* (core.js: aws4fetch, dsb) me-resolve dep dari
+# /app/server/node_modules — symlink agar Node menemukannya.
+RUN ln -s /app/server/node_modules /app/node_modules
 
 # 3) Generate src/gen dari functions/lib (gagal keras kalau path salah)
 RUN npm run sync && test -f ./src/gen/router.js
