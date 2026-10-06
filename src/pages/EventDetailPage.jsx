@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useUsers } from '../context/UsersContext'
 import { useEvents } from '../context/EventsContext'
 import Modal from '../components/Modal'
 
@@ -190,7 +191,8 @@ function AddManpowerModal({ users, open, onClose, onAdd }) {
 export default function EventDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { currentUser, users } = useAuth()
+  const { currentUser } = useAuth()
+  const { users } = useUsers()
   const { getEventById, updateEvent } = useEvents()
   const [open, setOpen] = useState(false)
   const [addCostOpen, setAddCostOpen] = useState(false)
@@ -198,6 +200,19 @@ export default function EventDetailPage() {
   const [costInput, setCostInput] = useState('')
 
   const event = useMemo(() => getEventById(id), [getEventById, id])
+  const creatorName = useMemo(() => {
+    if (!event?.createdBy) return 'Anonim'
+    const raw = String(event.createdBy)
+    if (raw.startsWith('usr_')) {
+      const u = users.find((x) => x.id === raw)
+      return u?.fullName || u?.username || raw
+    }
+    const byUsername = users.find((x) => x.username === raw)
+    if (byUsername) return byUsername.fullName || raw
+    const byId = users.find((x) => x.id === raw)
+    if (byId) return byId.fullName || raw
+    return raw
+  }, [event?.createdBy, users])
 
   if (!event) {
     return (
@@ -286,7 +301,7 @@ export default function EventDetailPage() {
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
-                Dibuat oleh {event.createdBy || 'Anonim'}
+                Dibuat oleh {creatorName}
               </p>
               {event.poAmount > 0 && (
                 <p className="flex items-center gap-1.5">

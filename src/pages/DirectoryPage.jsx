@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useUsers } from '../context/UsersContext'
 import Avatar from '../components/Avatar'
 
 function RoleBadge({ role }) {
-  if (role === 'admin') {
+  if (role === 'admin' || role === 'superadmin') {
     return <span className="chip border border-violet-200 bg-violet-50 text-violet-700"><span className="h-1.5 w-1.5 rounded-full bg-violet-500" />Admin</span>
   }
   return <span className="chip border border-slate-200 bg-slate-50 text-slate-600">Karyawan</span>
@@ -25,7 +26,7 @@ function UserDetailModal({ user, onClose }) {
         <div className="space-y-2 rounded-xl border border-slate-100 bg-slate-50/50 p-4">
           <DetailRow label="NIK" value={user.nik || '—'} mono />
           <DetailRow label="Divisi" value={user.division || '—'} />
-          <DetailRow label="Role" value={user.role === 'admin' ? 'Administrator' : 'Karyawan'} />
+          <DetailRow label="Role" value={user.role === 'admin' || user.role === 'superadmin' ? 'Administrator' : 'Karyawan'} />
           <DetailRow label="Bergabung" value={user.createdAt ? new Date(user.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '—'} />
         </div>
 
@@ -47,7 +48,8 @@ function DetailRow({ label, value, mono = false }) {
 }
 
 export default function DirectoryPage() {
-  const { users, currentUser } = useAuth()
+  const { users } = useUsers()
+  const { currentUser } = useAuth()
   const [search, setSearch] = useState('')
   const [division, setDivision] = useState('all')
   const [selected, setSelected] = useState(null)
@@ -143,7 +145,7 @@ export default function DirectoryPage() {
                   </div>
                   <p className="truncate font-mono text-[11px] text-slate-500">@{u.username} · {u.division || '—'}</p>
                 </div>
-                {u.role === 'admin' && (
+                {(u.role === 'admin' || u.role === 'superadmin') && (
                   <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-violet-50 text-violet-600">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />

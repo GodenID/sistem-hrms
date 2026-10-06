@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useLeave } from '../context/LeaveContext'
 import { usePengajuan, calculateLeaveDays } from '../context/PengajuanContext'
+import { useToast } from '../context/ToastContext'
 import Modal from '../components/Modal'
 import Pagination from '../components/Pagination'
 
@@ -70,17 +72,19 @@ function EmptyState({ onCreate, isFiltered }) {
   )
 }
 
-function CreatePengajuanForm({ onSubmit, onCancel }) {
+function CreatePengajuanForm({ onSubmit, onCancel, initialType }) {
   const { types } = usePengajuan()
-  const { currentUser, getLeaveBalance } = useAuth()
+  const { currentUser } = useAuth()
+  const { getLeaveBalance } = useLeave()
   const todayStr = new Date().toISOString().slice(0, 10)
-  const [type, setType] = useState(types[0]?.id || '')
+  const [type, setType] = useState(initialType || types[0]?.id || '')
   const [startDate, setStartDate] = useState(todayStr)
   const [endDate, setEndDate] = useState(todayStr)
   const [clockInTime, setClockInTime] = useState('09:00')
   const [clockOutTime, setClockOutTime] = useState('17:00')
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   // Saldo cuti tahun ini (reactive)
   const currentYear = new Date().getFullYear()
@@ -95,8 +99,9 @@ function CreatePengajuanForm({ onSubmit, onCancel }) {
   const isLembur = type === 'lembur'
   const showTimeInputs = isKoreksi || isLembur
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
+    if (submitting) return
     if (!type || !startDate || !endDate) { setError('Semua field wajib diisi.'); return }
     if (endDate < startDate) { setError('Tanggal selesai harus setelah tanggal mulai.'); return }
     if (!reason.trim()) { setError('Alasan wajib diisi.'); return }
@@ -104,7 +109,14 @@ function CreatePengajuanForm({ onSubmit, onCancel }) {
       setError(`Saldo cuti tidak cukup. Sisa ${balance.remaining} hari, diminta ${requestedDays} hari (kurang ${requestedDays - balance.remaining} hari). Kurangi tanggal pengajuan.`)
       return
     }
-    onSubmit({ type, startDate, endDate, reason, clockInTime, clockOutTime })
+    setSubmitting(true)
+    setError('')
+    try {
+      const res = await onSubmit({ type, startDate, endDate, reason, clockInTime, clockOutTime })
+      if (res && !res.ok && res.error) setError(res.error)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -196,9 +208,12 @@ function CreatePengajuanForm({ onSubmit, onCancel }) {
       )}
 
       <div className="flex gap-3 pt-1">
-        <button type="button" onClick={onCancel} className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50 active:scale-[0.99]">Batal</button>
-        <button type="submit" disabled={isCutiOverLimit} className="flex-1 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50">
-          <span className="relative">Kirim</span>
+        <button type="button" onClick={onCancel} disabled={submitting} className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50 active:scale-[0.99] disabled:opacity-50">Batal</button>
+        <button type="submit" disabled={isCutiOverLimit || submitting} className="flex-1 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50">
+          <span className="relative flex items-center justify-center gap-2">
+            {submitting && <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />}
+            {submitting ? 'Mengirim...' : 'Kirim'}
+          </span>
         </button>
       </div>
     </form>
@@ -217,9 +232,11 @@ function formatDateRange(start, end) {
 export default function PengajuanPage() {
   const { currentUser } = useAuth()
   const { pengajuan, createPengajuan, types } = usePengajuan()
+  const toast = useToast()
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState(false)
+  const [initialType, setInitialType] = useState('')
   const [pengajuanPage, setPengajuanPage] = useState(1)
   const PENGAJUAN_PAGE_SIZE = 10
 
@@ -255,7 +272,18 @@ export default function PengajuanPage() {
 
   const handleSubmit = async (payload) => {
     const result = await createPengajuan(payload)
-    if (result.ok) setModal(false)
+    if (result.ok) {
+      setModal(false)
+      toast.success('Pengajuan berhasil dikirim! Menunggu persetujuan admin.')
+    } else {
+      toast.error(result.error || 'Gagal mengirim pengajuan')
+    }
+    return result
+  }
+
+  const openCreate = (typeId = '') => {
+    setInitialType(typeId)
+    setModal(true)
   }
 
   return (
@@ -265,8 +293,8 @@ export default function PengajuanPage() {
         subtitle="Cuti, izin, dan pengajuan lainnya"
         action={
           <button
-            onClick={() => setModal(true)}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 active:scale-[0.98]"
+            onClick={() => openCreate()}
+            className="hidden md:inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 active:scale-[0.98]"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -308,7 +336,7 @@ export default function PengajuanPage() {
 
       {/* List */}
       {myPengajuan.length === 0 ? (
-        <EmptyState onCreate={() => setModal(true)} />
+        <EmptyState onCreate={() => openCreate()} />
       ) : filtered.length === 0 ? (
         <div className="card flex flex-col items-center justify-center px-6 py-10 text-center animate-fade-in">
           <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-50 text-slate-400">
@@ -355,7 +383,7 @@ export default function PengajuanPage() {
       )}
 
       <Modal open={modal} title="Buat Pengajuan Baru" onClose={() => setModal(false)}>
-        <CreatePengajuanForm onSubmit={handleSubmit} onCancel={() => setModal(false)} />
+        <CreatePengajuanForm onSubmit={handleSubmit} onCancel={() => setModal(false)} initialType={initialType} />
       </Modal>
     </div>
   )

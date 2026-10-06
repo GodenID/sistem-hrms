@@ -74,6 +74,28 @@ export function AnnouncementsProvider({ children }) {
     }
   }, [])
 
+  const markRead = useCallback(async (id) => {
+    try {
+      await api(`/announcements/${id}/read`, { method: 'POST' })
+      setAnnouncements((prev) => (prev || []).map((a) => {
+        if (a.id !== id || a.hasRead) return a
+        return { ...a, hasRead: true, readCount: (a.readCount || 0) + 1 }
+      }))
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err.message }
+    }
+  }, [])
+
+  const fetchReads = useCallback(async (id) => {
+    try {
+      const res = await api(`/announcements/${id}/reads`)
+      return { ok: true, data: res }
+    } catch (err) {
+      return { ok: false, error: err.message }
+    }
+  }, [])
+
   const getById = useCallback((id) => {
     return (announcements || []).find((a) => a.id === id) || null
   }, [announcements])
@@ -91,10 +113,12 @@ export function AnnouncementsProvider({ children }) {
     createAnnouncement,
     updateAnnouncement,
     deleteAnnouncement,
+    markRead,
+    fetchReads,
     getById,
     typeMeta,
     types: ANNOUNCEMENT_TYPES,
-  }), [sortedAnnouncements, createAnnouncement, updateAnnouncement, deleteAnnouncement, getById, typeMeta])
+  }), [sortedAnnouncements, createAnnouncement, updateAnnouncement, deleteAnnouncement, markRead, fetchReads, getById, typeMeta])
 
   return <AnnouncementsContext.Provider value={value}>{children}</AnnouncementsContext.Provider>
 }

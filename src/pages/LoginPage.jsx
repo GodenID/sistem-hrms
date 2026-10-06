@@ -34,10 +34,17 @@ function Sparkles() {
 export default function LoginPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
+  const [shake, setShake] = useState(false)
   const [loading, setLoading] = useState(false)
   const { login } = useAuth()
   const navigate = useNavigate()
+
+  const triggerShake = () => {
+    setShake(true)
+    setTimeout(() => setShake(false), 320)
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -45,6 +52,7 @@ export default function LoginPage() {
 
     if (!username.trim() || !password.trim()) {
       setError('Username dan password wajib diisi.')
+      triggerShake()
       return
     }
 
@@ -53,6 +61,7 @@ export default function LoginPage() {
       const result = await login(username.trim(), password)
       if (!result.ok) {
         setError(result.error || 'Username atau password salah.')
+        triggerShake()
         return
       }
       navigate('/')
@@ -86,7 +95,7 @@ export default function LoginPage() {
 
           <h1 className="font-display mt-6 text-[2.6rem] leading-none font-bold tracking-tight text-slate-900">
             <span className="italic">Prasasti</span>{' '}
-            <span className="text-indigo-600">Group</span>
+            <span className="text-indigo-600">Connect</span>
           </h1>
 
           {/* Subtitle: small mono pill chip */}
@@ -107,7 +116,7 @@ export default function LoginPage() {
         </div>
 
         {/* Card */}
-        <div className="card p-7">
+        <div className={`card p-7 ${shake ? 'animate-shake' : ''}`}>
           <div className="mb-5">
             <h2 className="text-[15px] font-bold tracking-tight text-slate-900">
               Selamat Datang Kembali
@@ -133,7 +142,7 @@ export default function LoginPage() {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="block w-full rounded-xl border border-slate-200 bg-slate-50/50 py-3.5 pl-12 pr-4 text-slate-900 placeholder-slate-400 transition focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
+                  className={`block w-full rounded-xl border bg-slate-50/50 py-3.5 pl-12 pr-4 text-slate-900 placeholder-slate-400 transition focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 ${error ? 'border-red-300 focus:border-red-400 focus:ring-red-500/10' : 'border-slate-200 focus:border-indigo-400'}`}
                   placeholder="Masukkan username"
                   autoComplete="username"
                 />
@@ -160,13 +169,30 @@ export default function LoginPage() {
                 </div>
                 <input
                   id="password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="block w-full rounded-xl border border-slate-200 bg-slate-50/50 py-3.5 pl-12 pr-4 text-slate-900 placeholder-slate-400 transition focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
+                  className={`block w-full rounded-xl border bg-slate-50/50 py-3.5 pl-12 pr-12 text-slate-900 placeholder-slate-400 transition focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 ${error ? 'border-red-300 focus:border-red-400 focus:ring-red-500/10' : 'border-slate-200 focus:border-indigo-400'}`}
                   placeholder="Masukkan password"
                   autoComplete="current-password"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                  className="absolute inset-y-0 right-0 flex items-center pr-4 text-slate-400 transition hover:text-slate-600"
+                >
+                  {showPassword ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
+                    </svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                  )}
+                </button>
               </div>
             </div>
 
@@ -223,7 +249,7 @@ export default function LoginPage() {
 
         {/* Footer micro-mark */}
         <p className="mt-6 text-center font-mono text-[10px] font-medium uppercase tracking-[0.25em] text-slate-400">
-          © {new Date().getFullYear()} Prasasti Group
+          © {new Date().getFullYear()} Prasasti Connect
         </p>
       </div>
     </div>

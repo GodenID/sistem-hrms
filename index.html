@@ -3,12 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#ffffff" />
-    <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='46' fill='%236366f1'/><text x='50' y='68' font-family='Georgia,serif' font-size='56' font-style='italic' font-weight='700' text-anchor='middle' fill='white'>P</text></svg>" />
+    <meta name="description" content="Prasasti Connect — absensi, pengajuan cuti, event, dan OKR." />
+    <meta name="theme-color" content="#0f2645" />
+    <meta name="apple-mobile-web-app-title" content="Prasasti Connect" />
+    <meta name="application-name" content="Prasasti Connect" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+    <script>
+      window.OneSignalDeferred = window.OneSignalDeferred || [];
+      OneSignalDeferred.push(async function(OneSignal) {
+        await OneSignal.init({
+          appId: "a0e23f3d-e5c3-4d05-b583-400940e6fe2f",
+          safari_web_id: "web.onesignal.auto.24c5a223-602c-4339-a230-554aefc554b5",
+          notifyButton: { enable: true },
+        });
+      });
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700;800&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500;1,9..144,600;1,9..144,700;1,9..144,800&display=swap" rel="stylesheet">
-    <title>Prasasti Group · HRMS</title>
+    <title>Prasasti Connect</title>
   </head>
   <body>
     <div id="root"></div>

@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useUsers } from '../context/UsersContext'
+import { useLeave } from '../context/LeaveContext'
 import { usePengajuan, calculateLeaveDays } from '../context/PengajuanContext'
 import Modal from '../components/Modal'
 import ConfirmModal from '../components/ConfirmModal'
@@ -13,6 +15,14 @@ import {
   requestPermission as requestBrowserPermission,
   PREF_STORAGE_KEY,
 } from '../utils/browserNotifications'
+import { hardRefreshPWA } from '../utils/location'
+import {
+  enablePush,
+  disablePush,
+  getPushSubscription,
+  testPush,
+  pushSupported,
+} from '../services/push'
 
 function PageHeader({ title, subtitle }) {
   return (
@@ -115,7 +125,7 @@ function ChangePasswordSection() {
   }
 
   return (
-    <div className="card mb-5 p-5 animate-slide-up" style={{ animationDelay: '0.1s' }}>
+    <div id="keamanan" className="card mb-5 p-5 animate-slide-up" style={{ animationDelay: '0.1s' }}>
       <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">Ganti Password</h3>
       <form onSubmit={handleSubmit} className="space-y-3">
         <div>
@@ -187,7 +197,9 @@ function ChangePasswordSection() {
 }
 
 export default function SettingsPage() {
-  const { currentUser, logout, getLeaveBalance, updateUser, getLeaveAdjustments } = useAuth()
+  const { currentUser, logout } = useAuth()
+  const { getLeaveBalance, getLeaveAdjustments } = useLeave()
+  const { updateUser } = useUsers()
   const { pengajuan } = usePengajuan()
   const toast = useToast()
   const [leaveHistoryOpen, setLeaveHistoryOpen] = useState(false)
@@ -394,8 +406,26 @@ export default function SettingsPage() {
     <div className="mx-auto flex min-h-full max-w-mobile flex-col bg-slate-50 px-5 py-6">
       <PageHeader title="Pengaturan" subtitle="Profil & preferensi akun" />
 
+      <div className="sticky top-0 z-10 -mx-5 mb-4 flex gap-2 overflow-x-auto border-b border-slate-200 bg-white/80 px-5 py-2 backdrop-blur-md scrollbar-hide">
+        {[
+          { id: 'profil', label: 'Profil' },
+          { id: 'kontak', label: 'Kontak' },
+          { id: 'cuti', label: 'Cuti' },
+          { id: 'keamanan', label: 'Keamanan' },
+          { id: 'notifikasi', label: 'Notifikasi' },
+        ].map((s) => (
+          <button
+            key={s.id}
+            onClick={() => document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            className="flex-shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-bold text-slate-600 transition hover:bg-slate-50 active:scale-95"
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
       {/* Profile Header Card */}
-      <div className="card mb-5 overflow-hidden p-5 animate-slide-up">
+      <div id="profil" className="card mb-5 overflow-hidden p-5 animate-slide-up">
         <div className="flex items-center gap-4">
           <Avatar
             name={currentUser.fullName || currentUser.username}
@@ -427,6 +457,7 @@ export default function SettingsPage() {
 
       {/* Saldo Cuti Card */}
       <button
+        id="cuti"
         onClick={() => setLeaveHistoryOpen(true)}
         className="card mb-5 w-full overflow-hidden p-5 text-left transition hover:border-indigo-300 hover:shadow-md active:scale-[0.99] animate-slide-up"
         style={{ animationDelay: '0.03s' }}
@@ -571,7 +602,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Kontak & Informasi Tambahan — editable, non-sensitif */}
-      <div className="card mb-5 p-5 animate-slide-up" style={{ animationDelay: '0.08s' }}>
+      <div id="kontak" className="card mb-5 p-5 animate-slide-up" style={{ animationDelay: '0.08s' }}>
         <div className="mb-1 flex items-center gap-2">
           <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500">
             Kontak & Informasi Tambahan
@@ -725,7 +756,24 @@ export default function SettingsPage() {
       {/* Change Password */}
       <ChangePasswordSection />
 
-      <BrowserNotificationSection />
+      <PushNotificationSection />
+
+      <div className="card p-5 animate-slide-up" style={{ animationDelay: '0.14s' }}>
+        <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">Aplikasi</h3>
+        <div className="space-y-2">
+          <button onClick={() => window.location.reload()} className="w-full rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50 active:scale-[0.99]">
+            Perbarui Aplikasi
+          </button>
+          <button onClick={hardRefreshPWA} className="w-full rounded-xl bg-indigo-600 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 active:scale-[0.98]">
+            Bersihkan Cache &amp; Muat Ulang (Hard Refresh PWA)
+          </button>
+          <p className="text-[11px] leading-relaxed text-slate-400">
+            Pakai ini kalau PWA tidak update atau `Clock In` bilang lokasi ditolak padahal sudah Add to Home Screen.<br />
+            <b>Android:</b> tahan ikon HRMS → Info Aplikasi → Penyimpanan → Hapus cache → Izin → Lokasi → Izinkan.<br />
+            <b>iPhone:</b> hapus PWA → buka Safari → Share → Add to Home Screen lagi → izinkan lokasi saat Clock In.
+          </p>
+        </div>
+      </div>
 
       {/* Actions */}
       <div className="space-y-3 animate-slide-up" style={{ animationDelay: '0.15s' }}>
@@ -739,7 +787,7 @@ export default function SettingsPage() {
           Keluar dari Akun
         </button>
         <p className="text-center text-[10px] font-bold uppercase tracking-widest text-slate-400">
-          © {new Date().getFullYear()} Prasasti Group · HRMS
+          © {new Date().getFullYear()} Prasasti Connect · HRMS
         </p>
       </div>
 
@@ -1005,7 +1053,7 @@ function BrowserNotificationSection() {
   const status = BROWSER_PERM_STATUS[perm] || BROWSER_PERM_STATUS.unsupported
 
   return (
-    <div className="card mb-5 p-5 animate-slide-up" style={{ animationDelay: '0.12s' }}>
+    <div id="notifikasi" className="card mb-5 p-5 animate-slide-up" style={{ animationDelay: '0.12s' }}>
       <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">
         Notifikasi Browser
       </h3>
@@ -1079,6 +1127,141 @@ function BrowserNotificationSection() {
               <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-[11px] leading-relaxed text-emerald-700">
                 Notifikasi browser aktif. Anda akan menerima pemberitahuan OS-level untuk pengajuan
                 yang disetujui/ditolak, event baru, dan pengumuman penting.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// Push Notification Section — Web Push (true push, jalan walau
+// aplikasi ditutup / tab tidak dibuka).
+// ============================================================
+function PushNotificationSection() {
+  const toast = useToast()
+  const [enabled, setEnabled] = useState(false)
+  const [checking, setChecking] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [perm, setPerm] = useState(() => (pushSupported() ? Notification.permission : 'unsupported'))
+
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      try {
+        const sub = await getPushSubscription()
+        if (mounted) setEnabled(Boolean(sub))
+      } catch {
+        // SW belum siap — biarkan dalam keadaan mati
+      } finally {
+        if (mounted) setChecking(false)
+      }
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  const handleToggle = async (next) => {
+    setBusy(true)
+    try {
+      if (next) {
+        const result = await enablePush()
+        setPerm(result.status)
+        if (result.status === 'granted') {
+          setEnabled(true)
+          toast.success('Notifikasi push aktif')
+        } else if (result.status === 'denied') {
+          toast.error('Izin notifikasi ditolak oleh browser')
+        } else {
+          toast.error('Gagal mengaktifkan notifikasi push')
+        }
+      } else {
+        await disablePush()
+        setEnabled(false)
+        toast.success('Notifikasi push dimatikan')
+      }
+    } catch (err) {
+      toast.error(err?.message || 'Gagal mengubah notifikasi push')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleTest = async () => {
+    setBusy(true)
+    try {
+      await testPush('Prasasti Connect', 'Notifikasi push berfungsi dengan baik!')
+      toast.success('Notifikasi uji terkirim ke perangkat ini')
+    } catch (err) {
+      toast.error(err?.message || 'Gagal mengirim notifikasi uji')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const permBadge = {
+    granted: { bg: 'bg-emerald-50', text: 'text-emerald-700', label: 'Diizinkan' },
+    default: { bg: 'bg-amber-50', text: 'text-amber-700', label: 'Belum Diizinkan' },
+    denied: { bg: 'bg-rose-50', text: 'text-rose-700', label: 'Ditolak' },
+    unsupported: { bg: 'bg-slate-100', text: 'text-slate-600', label: 'Tidak Didukung' },
+  }[perm] || { bg: 'bg-slate-100', text: 'text-slate-600', label: 'Tidak Didukung' }
+
+  return (
+    <div id="notifikasi" className="card mb-5 p-5 animate-slide-up" style={{ animationDelay: '0.14s' }}>
+      <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">Notifikasi Push (OneSignal)</h3>
+      <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold text-slate-900">Notifikasi Push (PWA)</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
+              Terima notifikasi walau aplikasi ditutup — mis. pengajuan disetujui/ditolak atau
+              absensi manual dikonfirmasi. Butuh aplikasi terpasang (Add to Home Screen) di iPhone.
+            </p>
+
+            <div className="mt-3">
+              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${permBadge.bg} ${permBadge.text}`}>
+                Izin: {permBadge.label}
+              </span>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-700">Aktifkan notifikasi push</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={enabled}
+                onClick={() => handleToggle(!enabled)}
+                disabled={checking || busy || !pushSupported()}
+                className={`relative h-6 w-11 flex-shrink-0 rounded-full transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                  enabled ? 'bg-violet-600' : 'bg-slate-300'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
+                    enabled ? 'left-5' : 'left-0.5'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {!pushSupported() && (
+              <p className="mt-2 rounded-lg bg-slate-100 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
+                Browser/perangkat tidak mendukung Web Push. Gunakan Chrome, Edge, atau Firefox di
+                Android/desktop; iPhone butuh Safari dengan aplikasi terpasang.
+              </p>
+            )}
+            {perm === 'denied' && (
+              <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-[11px] leading-relaxed text-rose-700">
+                Izin notifikasi ditolak oleh browser. Buka pengaturan situs (ikon gembok di address
+                bar) untuk mengizinkan kembali.
               </p>
             )}
           </div>

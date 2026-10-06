@@ -1,0 +1,22 @@
+{
+  "name": "hrms-api",
+  "private": true,
+  "version": "1.0.0",
+  "description": "HRMS API standalone (Node + Postgres) untuk deploy di Coolify. Logika bisnis di-sync otomatis dari functions/lib.",
+  "type": "module",
+  "scripts": {
+    "sync": "node ./scripts/sync-lib.mjs",
+    "prestart": "node ./scripts/sync-lib.mjs",
+    "start": "node ./src/index.js",
+    "dev": "node --watch ./src/index.js"
+  },
+  "dependencies": {
+    "aws4fetch": "^1.0.20",
+    "bcryptjs": "^3.0.3",
+    "hono": "^4.7.11",
+    "pg": "^8.13.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

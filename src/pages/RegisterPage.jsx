@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/Modal'
@@ -17,10 +17,9 @@ import {
   DIVISION_OPTIONS,
 } from '../utils/validation'
 import {
-  scanKtp,
-  validateKtpFile,
-  readFileAsDataUrl,
-  isDiditRealMode,
+  createDiditSession,
+  getDiditDecision,
+  extractDiditVerification,
   normalizeDateOfBirth,
   normalizeSex,
   sexLabel,
@@ -91,7 +90,7 @@ const STEPS = [
     id: 'ktp',
     label: 'Verifikasi KTP',
     title: 'Verifikasi Identitas',
-    subtitle: 'Upload foto KTP Anda. Sistem akan membaca data secara otomatis lewat OCR.',
+    subtitle: 'Verifikasi KTP lewat Didit. Data pribadi terisi otomatis setelah verifikasi selesai.',
     icon: 'id',
   },
   {
@@ -255,201 +254,16 @@ function Stepper({ steps, currentIndex, onJump }) {
   )
 }
 
-// Drop zone untuk upload KTP — mendukung klik & drag-drop.
-function KtpDropzone({ onFile, disabled, hint }) {
-  const inputRef = useRef(null)
-  const [dragging, setDragging] = useState(false)
-
-  const handleFiles = (files) => {
-    const file = files?.[0]
-    if (file) onFile(file)
-  }
-
-  return (
-    <div
-      className={[
-        'dropzone relative flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50/60 px-6 py-10 text-center',
-        dragging ? 'dropzone--active' : '',
-        disabled ? 'pointer-events-none opacity-60' : 'cursor-pointer',
-      ].join(' ')}
-      onClick={() => inputRef.current?.click()}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          inputRef.current?.click()
-        }
-      }}
-      role="button"
-      tabIndex={0}
-      onDragEnter={(e) => {
-        e.preventDefault()
-        if (!disabled) setDragging(true)
-      }}
-      onDragOver={(e) => {
-        e.preventDefault()
-        if (!disabled) setDragging(true)
-      }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={(e) => {
-        e.preventDefault()
-        setDragging(false)
-        if (!disabled) handleFiles(e.dataTransfer.files)
-      }}
-    >
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/jpeg,image/jpg,image/png,image/webp,image/tiff,application/pdf"
-        className="hidden"
-        onChange={(e) => handleFiles(e.target.files)}
-      />
-      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-100/70 text-indigo-600">
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5V18a2 2 0 002 2h14a2 2 0 002-2v-1.5M16.5 12L12 7.5 7.5 12M12 7.5V21" />
-        </svg>
-      </div>
-      <p className="text-sm font-bold text-slate-800">Klik atau seret foto KTP ke sini</p>
-      <p className="mt-1 text-[11px] text-slate-500">JPG, PNG, WEBP, atau PDF · Maks 10 MB</p>
-      {hint && <p className="mt-3 text-[10px] font-medium uppercase tracking-wider text-slate-400">{hint}</p>}
-    </div>
-  )
-}
-
-// Tampilkan preview KTP + ringkasan hasil OCR.
-function KtpResultCard({ previewUrl, fileName, ocr, onRetake, onUseManual }) {
-  return (
-    <div className="space-y-4">
-      {/* Preview KTP + animasi scan line di mode demo */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-900">
-        <div className="aspect-[16/10] w-full">
-          {previewUrl ? (
-            <img
-              src={previewUrl}
-              alt="Pratinjau KTP"
-              className="h-full w-full object-cover opacity-90"
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center text-slate-500">
-              <span className="text-xs">Pratinjau tidak tersedia</span>
-            </div>
-          )}
-        </div>
-        {/* Overlay gradient bawah untuk caption */}
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-900/90 via-slate-900/40 to-transparent px-4 py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs font-medium text-white">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-              <span className="truncate">{fileName || 'KTP terdeteksi'}</span>
-            </div>
-            <button
-              type="button"
-              onClick={onRetake}
-              className="rounded-full bg-white/90 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-700 transition hover:bg-white"
-            >
-              Ganti Foto
-            </button>
-          </div>
-        </div>
-        {/* Scan line animasi, hanya saat status = scanning */}
-        {ocr?.scanning && (
-          <>
-            <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent animate-ocr-scan" />
-            <div className="absolute inset-0 bg-emerald-400/5" />
-          </>
-        )}
-      </div>
-
-      {/* Ringkasan field hasil OCR */}
-      {ocr?.result && (
-        <div className="rounded-2xl border border-emerald-200/70 bg-emerald-50/50 p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-pulse-ring rounded-full bg-emerald-400" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-              </span>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
-                Data Terbaca {ocr.result.demo ? '(Demo)' : '· Didit.me'}
-              </span>
-            </div>
-            {ocr.result.documentType && (
-              <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-                {String(ocr.result.documentType).replace(/_/g, ' ')}
-              </span>
-            )}
-          </div>
-          <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <OcrField label="NIK" value={ocr.result.nik} mono />
-            <OcrField label="Nama Lengkap" value={ocr.result.fullName} />
-            <OcrField label="Tempat Lahir" value={ocr.result.placeOfBirth} />
-            <OcrField label="Tanggal Lahir" value={ocr.result.dateOfBirth} />
-            <OcrField label="Jenis Kelamin" value={sexLabel(ocr.result.sex)} />
-            <OcrField label="Alamat" value={ocr.result.address} fullWidth />
-          </dl>
-          {(ocr.result.warnings?.length ?? 0) > 0 && (
-            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
-              <span className="font-bold">Catatan:</span> {ocr.result.warnings.join('; ')}
-            </div>
-          )}
-          <p className="mt-3 text-[11px] text-emerald-700">
-            Data di bawah ini akan digunakan untuk registrasi dan tidak dapat diubah.
-          </p>
-        </div>
-      )}
-
-      {ocr?.error && (
-        <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
-          <svg xmlns="http://www.w3.org/2000/svg" className="mt-0.5 h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span>{ocr.error}</span>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function OcrField({ label, value, mono, fullWidth }) {
-  return (
-    <div className={fullWidth ? 'sm:col-span-2' : ''}>
-      <dt className="ocr-field-label">{label}</dt>
-      <dd className={['mt-0.5 text-sm font-semibold text-slate-900', mono ? 'font-mono tracking-wider' : ''].join(' ')}>
-        {value || <span className="text-slate-400">—</span>}
-      </dd>
-    </div>
-  )
-}
-
-// Banner kecil untuk membedakan demo vs real mode.
+// Banner kecil status verifikasi KTP via Didit.
 function OcrModeBanner() {
-  const real = isDiditRealMode()
   return (
-    <div
-      className={[
-        'flex items-start gap-2 rounded-xl border px-3 py-2 text-[11px] leading-relaxed',
-        real
-          ? 'border-emerald-200/80 bg-emerald-50/80 text-emerald-800'
-          : 'border-sky-200/80 bg-sky-50/80 text-sky-800',
-      ].join(' ')}
-    >
+    <div className="flex items-start gap-2 rounded-xl border border-emerald-200/80 bg-emerald-50/80 px-3 py-2 text-[11px] leading-relaxed text-emerald-800">
       <svg xmlns="http://www.w3.org/2000/svg" className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
       <span>
-        {real ? (
-          <>
-            <strong>Didit.me aktif.</strong> Data KTP Anda diproses oleh layanan OCR Didit untuk
-            verifikasi identitas.
-          </>
-        ) : (
-          <>
-            <strong>Mode demo.</strong> OCR berjalan lokal dengan data simulasi. Untuk produksi,
-            set <code className="rounded bg-white/60 px-1 font-mono text-[10px]">VITE_DIDIT_API_KEY</code>{' '}
-            di file <code className="font-mono text-[10px]">.env</code>.
-          </>
-        )}
+        <strong>Didit.me aktif.</strong> Verifikasi KTP dilakukan lewat halaman aman Didit;
+        data pribadi terisi otomatis setelah verifikasi selesai.
       </span>
     </div>
   )
@@ -467,12 +281,16 @@ export default function RegisterPage() {
   const [step, setStep] = useState(0)
   const [direction, setDirection] = useState('forward') // 'forward' | 'back' — untuk animasi
 
-  // State step 1 (KTP / OCR)
-  const [ktpFile, setKtpFile] = useState(null)
-  const [ktpPreview, setKtpPreview] = useState(null)
+  // State step 1 (verifikasi KTP via Didit)
   const [ktpNumber, setKtpNumber] = useState('') // NIK 16 digit (dipakai juga untuk simpan)
-  const [ocr, setOcr] = useState({ scanning: false, result: null, error: null })
-  const ocrAbortRef = useRef(null)
+  const [didit, setDidit] = useState({
+    starting: false, // sedang membuat sesi
+    sessionId: null,
+    url: null,
+    waiting: false, // sesi dibuat, menunggu user selesai di halaman Didit
+    result: null, // hasil verifikasi Approved
+    error: null,
+  })
 
   // State step 2 (data diri)
   const [fullName, setFullName] = useState('')
@@ -499,68 +317,74 @@ export default function RegisterPage() {
 
   const passwordCheck = validatePassword(password)
 
-  // Bersihkan URL object setiap kali file berubah agar tidak bocor di memory.
-  useEffect(() => {
-    return () => {
-      if (ktpPreview?.startsWith('blob:')) URL.revokeObjectURL(ktpPreview)
+  // ============================================================
+  // Handlers step 1 (verifikasi KTP via Didit)
+  // ============================================================
+  const handleStartVerification = useCallback(async () => {
+    setDidit({ starting: true, sessionId: null, url: null, waiting: false, result: null, error: null })
+    try {
+      const s = await createDiditSession()
+      if (!s?.url) throw new Error('Server tidak mengembalikan URL verifikasi.')
+      setDidit({ starting: false, sessionId: s.sessionId, url: s.url, waiting: true, result: null, error: null })
+      window.open(s.url, '_blank', 'noopener')
+    } catch (err) {
+      setDidit({ starting: false, sessionId: null, url: null, waiting: false, result: null, error: err?.message || 'Gagal memulai verifikasi.' })
     }
-  }, [ktpPreview])
+  }, [])
 
-  // ============================================================
-  // Handlers step 1
-  // ============================================================
-  const handleKtpSelected = useCallback(
-    async (file) => {
-      // batalkan OCR sebelumnya kalau ada
-      ocrAbortRef.current?.abort()
+  // Terapkan hasil verifikasi ke state form.
+  const applyDecision = useCallback((r) => {
+    setKtpNumber(r.nik || '')
+    setFullName(r.fullName || '')
+    setBirthPlace(r.placeOfBirth || '')
+    setBirthDate(normalizeDateOfBirth(r.dateOfBirth) || '')
+    setSex(normalizeSex(r.sex) || '')
+    setAddress(r.address || '')
+    setDidit((p) => ({ ...p, waiting: false, result: r, error: null }))
+  }, [])
 
-      const v = validateKtpFile(file)
-      if (!v.ok) {
-        setOcr({ scanning: false, result: null, error: v.error })
-        return
-      }
-
-      // revoke preview lama
-      if (ktpPreview?.startsWith('blob:')) URL.revokeObjectURL(ktpPreview)
-      const dataUrl = await readFileAsDataUrl(file).catch(() => null)
-      setKtpFile(file)
-      setKtpPreview(dataUrl)
-      setOcr({ scanning: true, result: null, error: null })
-
-      const ctrl = new AbortController()
-      ocrAbortRef.current = ctrl
+  // Polling hasil verifikasi selama sesi berjalan.
+  useEffect(() => {
+    if (!didit.sessionId || !didit.waiting) return
+    let cancelled = false
+    const tick = async () => {
       try {
-        const result = await scanKtp(file, { signal: ctrl.signal })
-        // Map hasil OCR ke state form
-        const normalizedDob = normalizeDateOfBirth(result.dateOfBirth)
-        const normalizedSex = normalizeSex(result.sex)
-        setKtpNumber(result.nik || '')
-        setFullName(result.fullName || '')
-        setBirthPlace(result.placeOfBirth || '')
-        setBirthDate(normalizedDob || '')
-        setSex(normalizedSex || '')
-        setAddress(result.address || '')
-        setOcr({ scanning: false, result, error: null })
-      } catch (err) {
-        if (err?.name === 'AbortError') return
-        setOcr({ scanning: false, result: null, error: err?.message || 'Gagal membaca KTP.' })
+        const d = await getDiditDecision(didit.sessionId)
+        if (cancelled) return
+        const status = String(d?.status || '')
+        if (status === 'Approved') {
+          applyDecision(extractDiditVerification(d))
+        } else if (['Declined', 'Abandoned'].includes(status)) {
+          setDidit((p) => ({
+            ...p,
+            waiting: false,
+            result: null,
+            error:
+              status === 'Declined'
+                ? 'Verifikasi ditolak. Silakan ulangi dengan foto KTP yang jelas.'
+                : 'Verifikasi tidak diselesaikan. Silakan ulangi.',
+          }))
+        }
+      } catch {
+        // status belum tersedia, lanjut polling
       }
-    },
-    [ktpPreview],
-  )
+    }
+    tick()
+    const t = setInterval(tick, 3000)
+    return () => {
+      cancelled = true
+      clearInterval(t)
+    }
+  }, [didit.sessionId, didit.waiting, applyDecision])
 
-  const handleRetake = useCallback(() => {
-    ocrAbortRef.current?.abort()
-    if (ktpPreview?.startsWith('blob:')) URL.revokeObjectURL(ktpPreview)
-    setKtpFile(null)
-    setKtpPreview(null)
+  const handleResetVerification = useCallback(() => {
     setKtpNumber('')
-    setOcr({ scanning: false, result: null, error: null })
-  }, [ktpPreview])
-
-  const handleUseManual = useCallback(() => {
-    // tetap pakai file/preview yang sudah di-upload, hanya bersihkan error OCR
-    setOcr((o) => ({ ...o, error: null }))
+    setFullName('')
+    setBirthPlace('')
+    setBirthDate('')
+    setSex('')
+    setAddress('')
+    setDidit({ starting: false, sessionId: null, url: null, waiting: false, result: null, error: null })
   }, [])
 
   // ============================================================
@@ -568,8 +392,7 @@ export default function RegisterPage() {
   // ============================================================
   const validateStep1 = () => {
     const e = {}
-    if (!ktpFile) e.ktpFile = 'Silakan upload foto KTP terlebih dahulu.'
-    if (!ktpNumber) e.ktpFile = 'Nomor KTP belum terbaca. Pastikan foto jelas atau input manual.'
+    if (!didit.result) e.ktpFile = 'Silakan verifikasi KTP terlebih dahulu.'
     else {
       const k = validateKtp(ktpNumber)
       if (!k.isValid) e.ktpFile = k.error
@@ -579,15 +402,14 @@ export default function RegisterPage() {
 
   const validateStep2 = () => {
     // Step 2 = konfirmasi data diri (read-only dari OCR) + pilih divisi.
-    // Field OCR sudah dijamin valid di Step 1 (validateStep1), jadi di sini
-    // cukup pastikan state OCR-derived masih terisi dan divisi dipilih.
+    // Field OCR yang tidak terbaca menjadi editable agar bisa dikoreksi manual.
     const e = {}
-    if (!ktpNumber) e.ktpNumber = 'Nomor KTP belum terbaca. Kembali ke langkah sebelumnya.'
-    if (!fullName?.trim()) e.fullName = 'Nama lengkap belum terbaca. Kembali ke langkah sebelumnya.'
-    if (!birthPlace?.trim()) e.birthPlace = 'Tempat lahir belum terbaca. Kembali ke langkah sebelumnya.'
-    if (!birthDate) e.birthDate = 'Tanggal lahir belum terbaca. Kembali ke langkah sebelumnya.'
-    if (!sex) e.sex = 'Jenis kelamin belum terbaca. Kembali ke langkah sebelumnya.'
-    if (!address?.trim()) e.address = 'Alamat belum terbaca. Kembali ke langkah sebelumnya.'
+    if (!ktpNumber) e.ktpNumber = 'Nomor KTP belum terbaca — isi manual.'
+    if (!fullName?.trim()) e.fullName = 'Nama lengkap belum terbaca — isi manual.'
+    if (!birthPlace?.trim()) e.birthPlace = 'Tempat lahir belum terbaca — isi manual.'
+    if (!birthDate) e.birthDate = 'Tanggal lahir belum terbaca — pilih tanggal.'
+    if (!sex) e.sex = 'Jenis kelamin belum terbaca — pilih salah satu.'
+    if (!address?.trim()) e.address = 'Alamat belum terbaca — isi manual.'
     const divCheck = validateDivision(division)
     if (!divCheck.isValid) e.division = divCheck.error
     return e
@@ -658,7 +480,7 @@ export default function RegisterPage() {
         birthDate,
         sex,
         address,
-        ktpVerified: Boolean(ocr.result) && (ocr.result.status || '').toLowerCase() === 'approved',
+        ktpVerified: Boolean(didit.result),
       })
       if (!result.ok) {
         // kembali ke step akun agar user lihat error username
@@ -711,7 +533,7 @@ export default function RegisterPage() {
           <div>
             <h1 className="font-display text-base font-bold leading-tight text-slate-900">
               <span className="italic">Prasasti</span>{' '}
-              <span className="text-indigo-600">Group</span>
+              <span className="text-indigo-600">Connect</span>
               <span className="ml-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">HRMS</span>
             </h1>
             <p className="text-[11px] text-slate-500">Registrasi Akun Baru</p>
@@ -769,28 +591,31 @@ export default function RegisterPage() {
           >
             {step === 0 && (
               <StepKtp
-                ktpFile={ktpFile}
-                ktpPreview={ktpPreview}
-                ocr={ocr}
-                onFile={handleKtpSelected}
-                onRetake={handleRetake}
+                didit={didit}
+                onStart={handleStartVerification}
+                onReset={handleResetVerification}
                 error={errors.ktpFile}
-                scanning={ocr.scanning}
               />
             )}
 
             {step === 1 && (
               <StepData
                 fullName={fullName}
+                setFullName={setFullName}
                 birthPlace={birthPlace}
+                setBirthPlace={setBirthPlace}
                 birthDate={birthDate}
+                setBirthDate={setBirthDate}
                 sex={sex}
+                setSex={setSex}
                 address={address}
+                setAddress={setAddress}
                 division={division}
                 setDivision={setDivision}
                 ktpNumber={ktpNumber}
+                setKtpNumber={setKtpNumber}
                 errors={errors}
-                ocrResult={ocr.result}
+                ocrResult={didit.result}
               />
             )}
 
@@ -823,7 +648,7 @@ export default function RegisterPage() {
                 setAgreed={setAgreed}
                 onOpenPrivacy={() => setPrivacyOpen(true)}
                 error={errors.agreed}
-                ocrResult={ocr.result}
+                ocrResult={didit.result}
               />
             )}
 
@@ -860,7 +685,7 @@ export default function RegisterPage() {
                     goNext()
                   }
                 }}
-                disabled={submitting || ocr.scanning}
+                disabled={submitting || didit.starting || didit.waiting}
                 className="relative flex flex-1 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500/25 active:scale-[0.98] disabled:opacity-60"
               >
                 {submitting ? (
@@ -952,39 +777,127 @@ function StepIcon({ name }) {
 // Komponen per-langkah (di-mount terpisah biar form tetap ringan)
 // ============================================================
 
-function StepKtp({
-  ktpFile,
-  ktpPreview,
-  ktpNumber,
-  setKtpNumber,
-  ocr,
-  onFile,
-  onRetake,
-  onUseManual,
-  error,
-  scanning,
-}) {
-  const showResult = ktpFile && (ocr.scanning || ocr.result || ocr.error)
+function StepKtp({ didit, onStart, onReset, error }) {
   return (
     <div className="space-y-4">
       <OcrModeBanner />
 
-      {!showResult ? (
-        <>
-          <KtpDropzone onFile={onFile} hint="Pastikan foto jelas, tidak buram, dan semua sudut terlihat." />
-          <p className="rounded-xl border border-indigo-100 bg-indigo-50/50 px-3 py-2 text-[11px] leading-relaxed text-indigo-700">
-            <span className="font-bold">Perhatian:</span> Nomor KTP hanya dapat dibaca otomatis lewat OCR.
-            Pastikan foto KTP terlihat jelas dan seluruh sudut dokumen masuk dalam frame.
-          </p>
-        </>
+      {didit.result ? (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-emerald-200/70 bg-emerald-50/50 p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              </span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+                KTP Terverifikasi · Didit.me
+              </span>
+              {didit.result.documentType && (
+                <span className="ml-auto rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                  {String(didit.result.documentType).replace(/_/g, ' ')}
+                </span>
+              )}
+            </div>
+            <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <KtpField label="NIK" value={didit.result.nik} mono />
+              <KtpField label="Nama Lengkap" value={didit.result.fullName} />
+              <KtpField label="Tempat Lahir" value={didit.result.placeOfBirth} />
+              <KtpField label="Tanggal Lahir" value={didit.result.dateOfBirth} />
+              <KtpField label="Jenis Kelamin" value={sexLabel(didit.result.sex)} />
+              <KtpField label="Alamat" value={didit.result.address} fullWidth />
+            </dl>
+            {(didit.result.warnings?.length ?? 0) > 0 && (
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                <span className="font-bold">Catatan:</span> {didit.result.warnings.join('; ')}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onReset}
+            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50 active:scale-[0.98]"
+          >
+            Ulangi Verifikasi KTP
+          </button>
+        </div>
+      ) : didit.waiting || didit.starting ? (
+        <div className="space-y-4">
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-indigo-200/70 bg-indigo-50/50 px-6 py-8 text-center">
+            <svg className="mb-3 h-8 w-8 animate-spin text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            <p className="text-sm font-bold text-slate-800">
+              {didit.starting ? 'Menyiapkan sesi verifikasi...' : 'Menunggu verifikasi selesai...'}
+            </p>
+            <p className="mt-1.5 max-w-xs text-[11px] leading-relaxed text-slate-500">
+              {didit.starting
+                ? 'Sebentar lagi halaman verifikasi Didit akan dibuka.'
+                : 'Selesaikan verifikasi di tab yang baru terbuka. Halaman ini akan terisi otomatis saat selesai.'}
+            </p>
+            {didit.url && !didit.starting && (
+              <a
+                href={didit.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-4 rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white transition hover:bg-indigo-700 active:scale-[0.98]"
+              >
+                Buka Lagi Halaman Verifikasi
+              </a>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onReset}
+            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50 active:scale-[0.98]"
+          >
+            Batal
+          </button>
+        </div>
       ) : (
-        <KtpResultCard
-          previewUrl={ktpPreview}
-          fileName={ktpFile?.name}
-          ocr={{ ...ocr, scanning: ocr.scanning || scanning }}
-          onRetake={onRetake}
-          onUseManual={onUseManual}
-        />
+        <div className="space-y-4">
+          <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50/60 px-6 py-10 text-center">
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-100/70 text-indigo-600">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M5 6h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2zm5 6a2 2 0 100-4 2 2 0 000 4z" />
+              </svg>
+            </div>
+            <p className="text-sm font-bold text-slate-800">Verifikasi Identitas lewat Didit</p>
+            <p className="mt-1 max-w-xs text-[11px] leading-relaxed text-slate-500">
+              Anda akan dibawa ke halaman aman Didit untuk memindai KTP. Data pribadi terisi otomatis setelah selesai.
+            </p>
+            <button
+              type="button"
+              onClick={onStart}
+              disabled={didit.starting}
+              className="mt-4 flex items-center gap-2 rounded-xl bg-indigo-600 px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500/25 active:scale-[0.98] disabled:opacity-60"
+            >
+              {didit.starting ? (
+                <svg className="h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5-5 5M6 12h12" />
+                </svg>
+              )}
+              {didit.starting ? 'Menyiapkan...' : 'Mulai Verifikasi KTP'}
+            </button>
+          </div>
+          {didit.error && (
+            <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
+              <svg xmlns="http://www.w3.org/2000/svg" className="mt-0.5 h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>{didit.error}</span>
+            </div>
+          )}
+          <p className="rounded-xl border border-indigo-100 bg-indigo-50/50 px-3 py-2 text-[11px] leading-relaxed text-indigo-700">
+            <span className="font-bold">Perhatian:</span> Nomor KTP hanya dapat dibaca lewat verifikasi.
+            Proses memakan waktu ±1 menit dan hasilnya otomatis mengisi formulir.
+          </p>
+        </div>
       )}
 
       {error && <p className="text-xs font-medium text-red-600">{error}</p>}
@@ -992,22 +905,39 @@ function StepKtp({
   )
 }
 
+function KtpField({ label, value, mono, fullWidth }) {
+  return (
+    <div className={fullWidth ? 'sm:col-span-2' : ''}>
+      <dt className="ocr-field-label">{label}</dt>
+      <dd className={['mt-0.5 text-sm font-semibold text-slate-900', mono ? 'font-mono tracking-wider' : ''].join(' ')}>
+        {value || <span className="text-slate-400">—</span>}
+      </dd>
+    </div>
+  )
+}
+
 function StepData({
   fullName,
+  setFullName,
   birthPlace,
+  setBirthPlace,
   birthDate,
+  setBirthDate,
   sex,
+  setSex,
   address,
+  setAddress,
+  ktpNumber,
+  setKtpNumber,
   division,
   setDivision,
-  ktpNumber,
   errors,
   ocrResult,
 }) {
   const filledFromOcr = Boolean(ocrResult)
 
   // Baris read-only: label kecil + value terkunci. Dipakai untuk semua data dari OCR.
-  const ReadOnlyRow = ({ label, value, mono = false, fullWidth = false }) => (
+  const ReadOnlyRow = ({ label, value, mono = false, fullWidth = false, error }) => (
     <div className={fullWidth ? 'sm:col-span-2' : ''}>
       <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
         <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1017,14 +947,26 @@ function StepData({
       </p>
       <div
         className={[
-          'rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800',
+          'rounded-xl border px-4 py-3 text-sm font-semibold text-slate-800',
+          error ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-200 bg-slate-50',
           mono ? 'font-mono tracking-wider' : '',
         ].join(' ')}
       >
         {value || <span className="font-normal text-slate-400">—</span>}
       </div>
+      {error && <p className="mt-1.5 text-xs font-medium text-red-600">{error}</p>}
     </div>
   )
+
+  const ocrErrors = [
+    { key: 'ktpNumber', label: 'NIK (Nomor KTP)' },
+    { key: 'fullName', label: 'Nama Lengkap' },
+    { key: 'birthPlace', label: 'Tempat Lahir' },
+    { key: 'birthDate', label: 'Tanggal Lahir' },
+    { key: 'sex', label: 'Jenis Kelamin' },
+    { key: 'address', label: 'Alamat' },
+  ]
+  const hasOcrError = ocrErrors.some(({ key }) => Boolean(errors[key]))
 
   return (
     <div className="space-y-5">
@@ -1035,14 +977,14 @@ function StepData({
         </svg>
         <span>
           Data di bawah ini{' '}
-          <span className="font-bold">diambil otomatis dari hasil OCR KTP</span>{' '}
+          <span className="font-bold">diambil otomatis dari hasil verifikasi KTP</span>{' '}
           dan <span className="font-bold">tidak dapat diubah</span> pada langkah ini. Data akan
           tersimpan ke profil Anda setelah registrasi selesai.
           {filledFromOcr ? null : (
             <>
               {' '}
               <span className="text-amber-700">
-                Jika ada yang tidak sesuai, kembali ke langkah sebelumnya dan upload ulang foto KTP.
+                Jika ada yang tidak sesuai, kembali ke langkah sebelumnya dan ulangi verifikasi.
               </span>
             </>
           )}
@@ -1062,12 +1004,98 @@ function StepData({
           </h3>
         </div>
         <div className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:grid-cols-2">
-          <ReadOnlyRow label="NIK (Nomor KTP)" value={ktpNumber} mono />
-          <ReadOnlyRow label="Nama Lengkap" value={fullName} />
-          <ReadOnlyRow label="Tempat Lahir" value={birthPlace} />
-          <ReadOnlyRow label="Tanggal Lahir" value={formatTgl(birthDate)} />
-          <ReadOnlyRow label="Jenis Kelamin" value={sexLabel(sex)} />
-          <ReadOnlyRow label="Alamat" value={address} fullWidth />
+          {errors.ktpNumber ? (
+            <Field label="NIK (Nomor KTP)" htmlFor="ktpNumber" error={errors.ktpNumber}>
+              <input
+                id="ktpNumber"
+                type="text"
+                inputMode="numeric"
+                maxLength={16}
+                value={ktpNumber}
+                onChange={(e) => setKtpNumber(e.target.value.replace(/\D/g, ''))}
+                className="block w-full rounded-xl border border-slate-200 bg-white px-4 py-3 font-mono tracking-wider text-slate-900 transition focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
+              />
+            </Field>
+          ) : (
+            <ReadOnlyRow label="NIK (Nomor KTP)" value={ktpNumber} mono />
+          )}
+          {errors.fullName ? (
+            <Field label="Nama Lengkap" htmlFor="fullName" error={errors.fullName}>
+              <input
+                id="fullName"
+                type="text"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                className="block w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 transition focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
+              />
+            </Field>
+          ) : (
+            <ReadOnlyRow label="Nama Lengkap" value={fullName} />
+          )}
+          {errors.birthPlace ? (
+            <Field label="Tempat Lahir" htmlFor="birthPlace" error={errors.birthPlace}>
+              <input
+                id="birthPlace"
+                type="text"
+                value={birthPlace}
+                onChange={(e) => setBirthPlace(e.target.value)}
+                className="block w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 transition focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
+              />
+            </Field>
+          ) : (
+            <ReadOnlyRow label="Tempat Lahir" value={birthPlace} />
+          )}
+          {errors.birthDate ? (
+            <Field label="Tanggal Lahir" htmlFor="birthDate" error={errors.birthDate}>
+              <input
+                id="birthDate"
+                type="date"
+                value={birthDate}
+                onChange={(e) => setBirthDate(e.target.value)}
+                className="block w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 transition focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
+              />
+            </Field>
+          ) : (
+            <ReadOnlyRow label="Tanggal Lahir" value={formatTgl(birthDate)} />
+          )}
+          {errors.sex ? (
+            <Field label="Jenis Kelamin" error={errors.sex}>
+              <div className="grid grid-cols-2 gap-2">
+                {['M', 'F'].map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setSex(opt)}
+                    className={[
+                      'rounded-xl border px-4 py-3 text-sm font-bold transition active:scale-[0.98]',
+                      sex === opt
+                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+                    ].join(' ')}
+                  >
+                    {sexLabel(opt)}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          ) : (
+            <ReadOnlyRow label="Jenis Kelamin" value={sexLabel(sex)} />
+          )}
+          {errors.address ? (
+            <div className="sm:col-span-2">
+              <Field label="Alamat" htmlFor="address" error={errors.address}>
+                <textarea
+                  id="address"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  rows={2}
+                  className="block w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 transition focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
+                />
+              </Field>
+            </div>
+          ) : (
+            <ReadOnlyRow label="Alamat" value={address} fullWidth />
+          )}
         </div>
       </section>
 
@@ -1244,7 +1272,7 @@ function StepReview({
           <p className="ocr-field-label">Ringkasan Pendaftaran</p>
           {ocrResult && (
             <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-              KTP {ocrResult.demo ? 'Demo' : 'Terverifikasi'}
+              KTP Terverifikasi
             </span>
           )}
         </div>

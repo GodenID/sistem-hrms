@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useClock } from '../context/ClockContext'
@@ -12,22 +12,8 @@ import LocationMapView from '../components/LocationMapView'
 import Modal from '../components/Modal'
 import ConfirmModal from '../components/ConfirmModal'
 import Avatar from '../components/Avatar'
-
-function formatLiveTime() {
-  const now = new Date()
-  const dateStr = now.toLocaleDateString('id-ID', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  })
-  // Manual format to ensure ':' separator (id-ID locale may render as '.')
-  const hh = String(now.getHours()).padStart(2, '0')
-  const mm = String(now.getMinutes()).padStart(2, '0')
-  const ss = String(now.getSeconds()).padStart(2, '0')
-  const timeStr = `${hh}:${mm}:${ss}`
-  return { dateStr, timeStr }
-}
+import LiveClock from '../components/LiveClock'
+import { useToast } from '../context/ToastContext'
 
 function getGreeting() {
   const hour = new Date().getHours()
@@ -72,17 +58,6 @@ const menuItems = [
     iconBg: 'bg-amber-50 text-amber-600',
   },
   {
-    to: '/calendar',
-    label: 'Kalender',
-    desc: 'Event dan Libur dan Cuti',
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-      </svg>
-    ),
-    iconBg: 'bg-fuchsia-50 text-fuchsia-600',
-  },
-  {
     to: '/okr',
     label: 'OKR',
     desc: 'Input, target, statistik & tim',
@@ -97,15 +72,20 @@ const menuItems = [
 
 export default function DashboardPage() {
   const { user, currentUser, logout, isAdmin } = useAuth()
-  const { clockIn, clockOut, doClockIn, doClockOut, hasClockedIn, hasClockedOut, submitPendingClock, pendingClocks, approvePendingClock, rejectPendingClock } = useClock()
+  const { clockIn, clockOut, doClockIn, doClockOut, hasClockedIn, hasClockedOut, submitPendingClock, pendingClocks, approvePendingClock, rejectPendingClock, isLoading } = useClock()
   const { notifications, unreadCount, markAllRead, clearAll, dismiss } = useNotifications()
   const { updateStatus } = usePengajuan()
   const { updateEvent } = useEvents()
-  const { announcements, typeMeta } = useAnnouncements()
+  const { announcements, typeMeta, markRead } = useAnnouncements()
   const { locations } = useLocations()
-  const [live, setLive] = useState(() => formatLiveTime())
+  const toast = useToast()
   const [notifOpen, setNotifOpen] = useState(false)
   const [selectedAnnouncement, setSelectedAnnouncement] = useState(null)
+
+  const openAnnouncement = (a) => {
+    setSelectedAnnouncement(a)
+    if (!a.hasRead) markRead(a.id)
+  }
   const [locationStatus, setLocationStatus] = useState(null)
   const [clockLoading, setClockLoading] = useState(false)
   const [pendingReason, setPendingReason] = useState('')
@@ -117,9 +97,17 @@ export default function DashboardPage() {
   const handleApprovePengajuan = (n) => {
     if (n.refType === 'pengajuan' && n.refId && currentUser) {
       updateStatus(n.refId, 'approved', currentUser)
+      toast.success('Pengajuan disetujui')
     }
     if (n.refType === 'pending_clock' && n.refId && currentUser) {
       approvePendingClock(n.refId)
+      toast.success('Pengajuan jam disetujui')
+    }
+    if (n.refType === 'pengajuan' || n.refType === 'pending_clock') {
+      // already toasted above
+    } else if (!n.refType) {
+      // fallback untuk notifikasi tanpa refType tapi type pengajuan_new
+      toast.success('Disetujui')
     }
     dismiss(n.id)
     onCloseNotif()
@@ -128,10 +116,13 @@ export default function DashboardPage() {
   const handleRejectPengajuan = (n) => {
     if (n.refType === 'pengajuan' && n.refId && currentUser) {
       updateStatus(n.refId, 'rejected', currentUser)
+      toast.success('Pengajuan ditolak')
     }
     if (n.refType === 'pending_clock' && n.refId && currentUser) {
       rejectPendingClock(n.refId)
+      toast.success('Pengajuan jam ditolak')
     }
+    if (!n.refType) toast.success('Ditolak')
     dismiss(n.id)
     onCloseNotif()
   }
@@ -139,6 +130,9 @@ export default function DashboardPage() {
   const handleApproveEvent = (n) => {
     if (n.refType === 'event' && n.refId && currentUser) {
       updateEvent(n.refId, { status: 'approved', reviewedBy: currentUser.id, reviewedByName: currentUser.fullName })
+      toast.success('Event disetujui')
+    } else {
+      toast.success('Disetujui')
     }
     dismiss(n.id)
     onCloseNotif()
@@ -147,6 +141,9 @@ export default function DashboardPage() {
   const handleRejectEvent = (n) => {
     if (n.refType === 'event' && n.refId && currentUser) {
       updateEvent(n.refId, { status: 'rejected', reviewedBy: currentUser.id, reviewedByName: currentUser.fullName })
+      toast.success('Event ditolak')
+    } else {
+      toast.success('Ditolak')
     }
     dismiss(n.id)
     onCloseNotif()
@@ -169,13 +166,6 @@ export default function DashboardPage() {
     const idx = Math.round(el.scrollLeft / cardWidth)
     setActiveAnnouncementIdx(Math.min(Math.max(idx, 0), announcements.length - 1))
   }
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setLive(formatLiveTime())
-    }, 1000)
-    return () => clearInterval(id)
-  }, [])
 
   const greeting = getGreeting()
   const workDuration = (() => {
@@ -219,6 +209,7 @@ export default function DashboardPage() {
 
   const handleClockIn = async () => {
     setClockLoading(true)
+    let coords = null
     if (locations.length > 0) {
       try {
         const status = await checkAndSetLocation()
@@ -229,18 +220,28 @@ export default function DashboardPage() {
           setClockLoading(false)
           return
         }
-      } catch {
-        setLocationStatus({ ok: false, name: null, distance: null })
+        coords = { lat: status.userLat, lng: status.userLng }
+      } catch (err) {
+        setLocationStatus({ ok: false, name: null, distance: null, error: err?.message || 'Gagal mendapatkan lokasi.' })
         setClockLoading(false)
         return
       }
     }
-    doClockIn()
+    const result = await doClockIn(coords || {})
+    if (!result.ok && (result.code === 'OUT_OF_RADIUS' || result.code === 'LOCATION_REQUIRED')) {
+      // Server menolak — fallback ke pengajuan manual
+      setPendingType('clockIn')
+      setPendingReason('')
+      setLocationStatus({ ok: false, name: result.location?.name || null, distance: result.location?.distance, serverError: result.error })
+      setClockLoading(false)
+      return
+    }
     setClockLoading(false)
   }
 
   const handleClockOut = async () => {
     setClockLoading(true)
+    let coords = null
     if (locations.length > 0) {
       try {
         const status = await checkAndSetLocation()
@@ -251,13 +252,21 @@ export default function DashboardPage() {
           setClockLoading(false)
           return
         }
-      } catch {
-        setLocationStatus({ ok: false, name: null, distance: null })
+        coords = { lat: status.userLat, lng: status.userLng }
+      } catch (err) {
+        setLocationStatus({ ok: false, name: null, distance: null, error: err?.message || 'Gagal mendapatkan lokasi.' })
         setClockLoading(false)
         return
       }
     }
-    doClockOut()
+    const result = await doClockOut(coords || {})
+    if (!result.ok && (result.code === 'OUT_OF_RADIUS' || result.code === 'LOCATION_REQUIRED')) {
+      setPendingType('clockOut')
+      setPendingReason('')
+      setLocationStatus({ ok: false, name: result.location?.name || null, distance: result.location?.distance, serverError: result.error })
+      setClockLoading(false)
+      return
+    }
     setClockLoading(false)
   }
 
@@ -314,22 +323,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Live Clock Card */}
-      <div className="card mb-6 overflow-hidden p-7 animate-slide-up">
-        <div className="mb-3 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-widest text-indigo-600">
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-400 opacity-75"></span>
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo-500"></span>
-          </span>
-          Live Time
-        </div>
-        <p className="text-center font-mono text-5xl font-extrabold tracking-tight text-slate-900">
-          {live.timeStr}
-        </p>
-        <p className="mt-2 text-center text-sm font-semibold text-slate-500">
-          {live.dateStr}
-        </p>
-      </div>
+      <LiveClock />
 
       {/* Location Status */}
       {locationStatus?.ok ? (
@@ -340,7 +334,7 @@ export default function DashboardPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
-              <span>di <strong>{locationStatus.name}</strong> ({locationStatus.distance}m)</span>
+              <span>Anda berada di <strong>{locationStatus.name}</strong> <span className="font-normal opacity-80">• {locationStatus.distance} m dari titik absensi</span></span>
             </div>
             <button onClick={() => setLocationStatus(null)} className="flex-shrink-0 rounded-lg p-1 transition hover:bg-emerald-100">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -351,18 +345,28 @@ export default function DashboardPage() {
         </div>
       ) : locationStatus && !locationStatus.ok && !pendingType && !locationStatus.name ? (
         <div className="mb-3 animate-slide-up" style={{ animationDelay: '0.03s' }}>
-          <div className="flex items-start justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-semibold text-rose-700">
-            <div className="flex items-start gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" className="mt-0.5 h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span>Tidak bisa mendapatkan lokasi. Izinkan akses lokasi di browser.</span>
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="mt-0.5 h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="leading-relaxed">{locationStatus.error || 'Tidak bisa mendapatkan lokasi. Izinkan akses lokasi di browser.'}</span>
+              </div>
+              <button onClick={() => setLocationStatus(null)} className="flex-shrink-0 rounded-lg p-1 transition hover:bg-rose-100">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
-            <button onClick={() => setLocationStatus(null)} className="flex-shrink-0 rounded-lg p-1 transition hover:bg-rose-100">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <div className="mt-2 flex gap-2">
+              <button onClick={async () => { try { const s = await checkAndSetLocation(); setLocationStatus(s) } catch (e) { setLocationStatus({ ok: false, name: null, distance: null, error: e?.message }) } }} className="flex-1 rounded-lg bg-rose-600 px-3 py-2 text-xs font-bold text-white hover:bg-rose-700">
+                Coba Lagi
+              </button>
+              <button onClick={() => { if (typeof window !== 'undefined') window.location.reload() }} className="rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-bold text-rose-700">
+                Muat Ulang
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -371,15 +375,15 @@ export default function DashboardPage() {
       <div className="mb-6 grid grid-cols-2 gap-3 animate-slide-up" style={{ animationDelay: '0.05s' }}>
         <button
           onClick={handleClockIn}
-          disabled={hasClockedIn || hasPendingClockIn || clockLoading}
+          disabled={isLoading || hasClockedIn || hasPendingClockIn || clockLoading}
           className={`group rounded-2xl p-5 text-left transition-all focus:outline-none focus:ring-4 focus:ring-emerald-500/20 active:scale-[0.98] ${
-            hasClockedIn || hasPendingClockIn || clockLoading
+            isLoading || hasClockedIn || hasPendingClockIn || clockLoading
               ? 'cursor-not-allowed border border-slate-200 bg-white text-slate-400'
               : 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/20 hover:bg-emerald-700'
           }`}
         >
-          <div className={`mb-3 flex h-12 w-12 items-center justify-center rounded-xl ${hasClockedIn || hasPendingClockIn || clockLoading ? 'bg-slate-100' : 'bg-white/20'}`}>
-            {clockLoading && !hasClockedIn ? (
+          <div className={`mb-3 flex h-12 w-12 items-center justify-center rounded-xl ${isLoading || hasClockedIn || hasPendingClockIn || clockLoading ? 'bg-slate-100' : 'bg-white/20'}`}>
+            {(clockLoading || isLoading) && !hasClockedIn ? (
               <svg className="h-6 w-6 animate-spin" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -391,24 +395,24 @@ export default function DashboardPage() {
             )}
           </div>
           <p className="text-xs font-bold uppercase tracking-wider opacity-80">
-            {clockLoading ? 'Memeriksa...' : hasPendingClockIn ? 'Menunggu' : 'Masuk'}
+            {clockLoading ? 'Memeriksa...' : isLoading ? 'Memuat...' : hasPendingClockIn ? 'Menunggu' : 'Masuk'}
           </p>
           <p className="text-lg font-extrabold">
-            {clockLoading ? 'Lokasi' : hasPendingClockIn ? 'Sudah Diajukan' : 'Clock In'}
+            {clockLoading ? 'Lokasi' : isLoading ? 'Menyiapkan' : hasPendingClockIn ? 'Sudah Diajukan' : 'Clock In'}
           </p>
         </button>
 
         <button
           onClick={handleClockOut}
-          disabled={!hasClockedIn || hasClockedOut || hasPendingClockOut || clockLoading}
+          disabled={isLoading || !hasClockedIn || hasClockedOut || hasPendingClockOut || clockLoading}
           className={`group rounded-2xl p-5 text-left transition-all focus:outline-none focus:ring-4 focus:ring-orange-500/20 active:scale-[0.98] ${
-            !hasClockedIn || hasClockedOut || hasPendingClockOut || clockLoading
+            isLoading || !hasClockedIn || hasClockedOut || hasPendingClockOut || clockLoading
               ? 'cursor-not-allowed border border-slate-200 bg-white text-slate-400'
               : 'bg-orange-500 text-white shadow-sm shadow-orange-500/20 hover:bg-orange-600'
           }`}
         >
-          <div className={`mb-3 flex h-12 w-12 items-center justify-center rounded-xl ${!hasClockedIn || hasClockedOut || hasPendingClockOut || clockLoading ? 'bg-slate-100' : 'bg-white/20'}`}>
-            {clockLoading && hasClockedIn && !hasClockedOut ? (
+          <div className={`mb-3 flex h-12 w-12 items-center justify-center rounded-xl ${isLoading || !hasClockedIn || hasClockedOut || hasPendingClockOut || clockLoading ? 'bg-slate-100' : 'bg-white/20'}`}>
+            {(clockLoading || isLoading) && hasClockedIn && !hasClockedOut ? (
               <svg className="h-6 w-6 animate-spin" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -420,10 +424,10 @@ export default function DashboardPage() {
             )}
           </div>
           <p className="text-xs font-bold uppercase tracking-wider opacity-80">
-            {clockLoading ? 'Memeriksa...' : hasPendingClockOut ? 'Menunggu' : 'Pulang'}
+            {clockLoading ? 'Memeriksa...' : isLoading ? 'Memuat...' : hasPendingClockOut ? 'Menunggu' : 'Pulang'}
           </p>
           <p className="text-lg font-extrabold">
-            {clockLoading ? 'Lokasi' : hasPendingClockOut ? 'Sudah Diajukan' : 'Clock Out'}
+            {clockLoading ? 'Lokasi' : isLoading ? 'Menyiapkan' : hasPendingClockOut ? 'Sudah Diajukan' : 'Clock Out'}
           </p>
         </button>
       </div>
@@ -502,15 +506,16 @@ export default function DashboardPage() {
                 <button
                   key={a.id}
                   data-carousel-card
-                  onClick={() => setSelectedAnnouncement(a)}
-                  className="card w-[78%] flex-shrink-0 snap-start p-3 text-left transition hover:border-indigo-300 hover:shadow-md active:scale-[0.99]"
+                  onClick={() => openAnnouncement(a)}
+                  className={`card relative w-[78%] flex-shrink-0 snap-start p-3 text-left transition hover:border-indigo-300 hover:shadow-md active:scale-[0.99] ${!a.hasRead ? 'ring-1 ring-indigo-300' : ''}`}
                 >
+                  {!a.hasRead && <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-indigo-600 shadow" />}
                   <div className="flex items-start gap-3">
                     <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-slate-50 text-lg">
                       {meta.emoji}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-bold text-slate-900">{a.title}</p>
+                      <p className="truncate text-sm font-bold text-slate-900">{a.title} {!a.hasRead && <span className="ml-1 inline-flex rounded-full bg-indigo-100 px-1.5 py-0.5 text-[8px] font-bold text-indigo-700">Baru</span>}</p>
                       <p className="mt-0.5 line-clamp-2 whitespace-pre-wrap text-xs leading-relaxed text-slate-600">{a.body}</p>
                       <p className="mt-1 font-mono text-[10px] text-slate-400">
                         {timeAgo(a.createdAt)} · {a.createdByName}
@@ -604,7 +609,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="mt-auto pt-6 text-center text-[10px] font-bold uppercase tracking-widest text-slate-400">
-        Prasasti Group · HRMS Mobile v1.0
+        Prasasti Connect · HRMS Mobile v1.0
       </div>
 
       <NotificationsDrawer
@@ -800,26 +805,100 @@ function NotifIcon({ type }) {
 function NotificationsDrawer({ open, onClose, notifications, onMarkAllRead, onClearAll, onDismiss, onApprove, onReject, onApproveEvent, onRejectEvent }) {
   const navigate = useNavigate()
   const [clearConfirm, setClearConfirm] = useState(false)
+  const [filter, setFilter] = useState('all')
+  const [detailNotif, setDetailNotif] = useState(null)
+  const [bulkConfirm, setBulkConfirm] = useState(null) // {type, list}
+  const { pengajuan } = usePengajuan()
+  const pendingClocks = useClock().pendingClocks || []
+
+  // Grouping — harus sebelum early return (Rules of Hooks)
+  const groups = useMemo(() => {
+    const g = { pengajuan: [], jam: [], event: [], lainnya: [] }
+    for (const n of notifications) {
+      if (n.type === 'pengajuan_new') g.pengajuan.push(n)
+      else if (n.type === 'pending_clock_new') g.jam.push(n)
+      else if (n.type === 'event_pending') g.event.push(n)
+      else g.lainnya.push(n)
+    }
+    return g
+  }, [notifications])
+
+  const counts = {
+    all: notifications.length,
+    pengajuan: groups.pengajuan.length,
+    jam: groups.jam.length,
+    event: groups.event.length,
+    lainnya: groups.lainnya.length,
+  }
+
+  const getVisible = () => {
+    if (filter === 'pengajuan') return [{ key: 'pengajuan', label: 'Pengajuan', list: groups.pengajuan, color: 'amber' }]
+    if (filter === 'jam') return [{ key: 'jam', label: 'Jam Luar Radius', list: groups.jam, color: 'sky' }]
+    if (filter === 'event') return [{ key: 'event', label: 'Event', list: groups.event, color: 'violet' }]
+    if (filter === 'lainnya') return [{ key: 'lainnya', label: 'Lainnya', list: groups.lainnya, color: 'slate' }]
+    return [
+      { key: 'pengajuan', label: 'Pengajuan', list: groups.pengajuan, color: 'amber' },
+      { key: 'jam', label: 'Jam Luar Radius', list: groups.jam, color: 'sky' },
+      { key: 'event', label: 'Event', list: groups.event, color: 'violet' },
+      { key: 'lainnya', label: 'Lainnya', list: groups.lainnya, color: 'slate' },
+    ].filter((g) => g.list.length > 0)
+  }
+
+  const visibleGroups = getVisible()
 
   if (!open) return null
 
-  const handleTap = (n) => {
-    // Click → otomatis hapus notifikasi dari list
+  const handleCardTap = (n) => {
+    // tap card → buka detail, bukan langsung dismiss
+    setDetailNotif(n)
+  }
+
+  const handleDismiss = (e, n) => {
+    e.stopPropagation()
     onDismiss(n.id)
-    // Navigasi: prioritas ke `link` field (untuk notifikasi custom),
-    // fallback ke event detail biar user bisa lihat detail event.
-    if (n.link) {
-      navigate(n.link)
-    } else if (n.refType === 'event' && n.refId) {
-      navigate(`/events/${n.refId}`)
-    }
-    onClose()
   }
 
   const handleAction = (e, fn, n) => {
     e.stopPropagation()
     fn(n)
   }
+
+  const handleBulk = (type) => {
+    const list = groups[type] || []
+    const pending = list.filter((n) => {
+      if (n.type === 'pengajuan_new') {
+        const p = pengajuan.find((x) => x.id === n.refId)
+        return p ? p.status === 'pending' : !n.read
+      }
+      if (n.type === 'pending_clock_new') {
+        const pc = pendingClocks.find((x) => x.id === n.refId)
+        return pc ? pc.status === 'pending' : !n.read
+      }
+      return !n.read
+    })
+    if (pending.length === 0) return
+    setBulkConfirm({ type, list: pending })
+  }
+
+  const confirmBulk = () => {
+    if (!bulkConfirm) return
+    const { type, list } = bulkConfirm
+    if (type === 'pengajuan' || type === 'jam') {
+      list.forEach((n) => onApprove(n))
+    } else if (type === 'event') {
+      list.forEach((n) => onApproveEvent(n))
+    }
+    setBulkConfirm(null)
+  }
+
+  const Chip = ({ id, label, count }) => (
+    <button
+      onClick={() => setFilter(id)}
+      className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-bold transition active:scale-95 ${filter === id ? 'bg-indigo-600 text-white shadow-sm' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+    >
+      {label} <span className={`${filter === id ? 'text-white/80' : 'text-slate-400'} ml-1`}>{count}</span>
+    </button>
+  )
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 backdrop-blur-sm sm:items-start sm:pt-16" onClick={onClose}>
@@ -829,7 +908,7 @@ function NotificationsDrawer({ open, onClose, notifications, onMarkAllRead, onCl
             <h2 className="font-display text-base font-bold text-slate-900">
               <span className="italic">Noti</span><span className="text-indigo-600">fikasi</span>
             </h2>
-            <p className="font-mono text-[10px] uppercase tracking-wider text-slate-400">{notifications.length} total</p>
+            <p className="font-mono text-[10px] uppercase tracking-wider text-slate-400">{notifications.length} total · {counts.pengajuan} pengajuan · {counts.jam} jam · {counts.event} event</p>
           </div>
           <div className="flex items-center gap-1">
             {notifications.some((n) => !n.read) && (
@@ -849,12 +928,30 @@ function NotificationsDrawer({ open, onClose, notifications, onMarkAllRead, onCl
               confirmLabel="Hapus Semua"
               variant="danger"
             />
+            <ConfirmModal
+              open={!!bulkConfirm}
+              onClose={() => setBulkConfirm(null)}
+              onConfirm={confirmBulk}
+              title={bulkConfirm?.type === 'pengajuan' ? `Setujui ${bulkConfirm.list.length} Pengajuan?` : bulkConfirm?.type === 'jam' ? `Setujui ${bulkConfirm.list.length} Jam?` : `Setujui ${bulkConfirm?.list.length} Event?`}
+              message="Semua notifikasi pada grup ini akan disetujui. Pastikan sudah diperiksa."
+              confirmLabel="Setujui Semua"
+              variant="default"
+            />
             <button onClick={onClose} className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100" aria-label="Tutup">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
+        </div>
+
+        {/* Filter chips */}
+        <div className="flex gap-2 overflow-x-auto border-b border-slate-100 bg-slate-50/60 px-5 py-2.5 scrollbar-hide">
+          <Chip id="all" label="Semua" count={counts.all} />
+          <Chip id="pengajuan" label="Pengajuan" count={counts.pengajuan} />
+          <Chip id="jam" label="Jam" count={counts.jam} />
+          <Chip id="event" label="Event" count={counts.event} />
+          {counts.lainnya > 0 && <Chip id="lainnya" label="Lainnya" count={counts.lainnya} />}
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -868,76 +965,204 @@ function NotificationsDrawer({ open, onClose, notifications, onMarkAllRead, onCl
               <h3 className="text-sm font-bold text-slate-900">Tidak ada notifikasi</h3>
               <p className="mt-1 text-xs text-slate-500">Notifikasi event, pengajuan, dan status akan muncul di sini.</p>
             </div>
+          ) : visibleGroups.length === 0 ? (
+            <div className="px-6 py-12 text-center text-sm text-slate-500">Tidak ada notifikasi di filter ini.</div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {notifications.map((n) => (
-                <button
-                  key={n.id}
-                  onClick={() => handleTap(n)}
-                  className={`flex w-full items-start gap-3 px-5 py-3.5 text-left transition hover:bg-slate-50 ${!n.read ? 'bg-indigo-50/30' : ''}`}
-                >
-                  <NotifIcon type={n.type} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="truncate text-sm font-bold text-slate-900">{n.title}</p>
-                      {!n.read && <span className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-indigo-600" />}
+              {visibleGroups.map((grp) => (
+                <div key={grp.key}>
+                  <div className={`sticky top-0 z-10 flex items-center justify-between border-y border-slate-100 px-5 py-2 backdrop-blur-md ${grp.color === 'amber' ? 'bg-amber-50/80' : grp.color === 'sky' ? 'bg-sky-50/80' : grp.color === 'violet' ? 'bg-violet-50/80' : 'bg-slate-50/80'}`}>
+                    <div className="flex items-center gap-2">
+                      <span className={`h-2 w-2 rounded-full ${grp.color === 'amber' ? 'bg-amber-500' : grp.color === 'sky' ? 'bg-sky-500' : grp.color === 'violet' ? 'bg-violet-500' : 'bg-slate-400'}`} />
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">{grp.label}</h3>
+                      <span className="rounded-full bg-white px-1.5 py-0.5 font-mono text-[10px] font-bold text-slate-600">{grp.list.length}</span>
                     </div>
-                    <p className="mt-0.5 whitespace-pre-wrap line-clamp-3 text-xs text-slate-600">{n.body}</p>
-                    <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-400">{timeAgo(n.createdAt)}</p>
-                    {n.type === 'pengajuan_new' && !n.read && (
-                      <div className="mt-2 flex gap-2">
-                        <button
-                          onClick={(e) => handleAction(e, onReject, n)}
-                          className="flex-1 rounded-lg border border-rose-200 bg-white py-1.5 text-[11px] font-bold text-rose-700 transition hover:bg-rose-50 active:scale-95"
-                        >
-                          Tolak
+                    {(() => {
+                      const pendingCount = grp.list.filter((n) => {
+                        if (grp.key === 'pengajuan') {
+                          const p = pengajuan.find((x) => x.id === n.refId)
+                          return p ? p.status === 'pending' : !n.read
+                        }
+                        if (grp.key === 'jam') {
+                          const pc = pendingClocks.find((x) => x.id === n.refId)
+                          return pc ? pc.status === 'pending' : !n.read
+                        }
+                        return !n.read
+                      }).length
+                      return (grp.key === 'pengajuan' || grp.key === 'jam' || grp.key === 'event') && pendingCount > 0 ? (
+                        <button onClick={() => handleBulk(grp.key)} className="rounded-lg bg-white px-2 py-1 text-[10px] font-bold text-indigo-600 shadow-sm ring-1 ring-slate-200 transition hover:bg-indigo-50">
+                          Setujui Semua ({pendingCount})
                         </button>
-                        <button
-                          onClick={(e) => handleAction(e, onApprove, n)}
-                          className="flex-1 rounded-lg bg-emerald-600 py-1.5 text-[11px] font-bold text-white shadow-sm transition hover:bg-emerald-700 active:scale-95"
-                        >
-                          Setujui
-                        </button>
-                      </div>
-                    )}
-                    {n.type === 'pending_clock_new' && !n.read && (
-                      <div className="mt-2 flex gap-2">
-                        <button
-                          onClick={(e) => handleAction(e, onReject, n)}
-                          className="flex-1 rounded-lg border border-rose-200 bg-white py-1.5 text-[11px] font-bold text-rose-700 transition hover:bg-rose-50 active:scale-95"
-                        >
-                          Tolak
-                        </button>
-                        <button
-                          onClick={(e) => handleAction(e, onApprove, n)}
-                          className="flex-1 rounded-lg bg-emerald-600 py-1.5 text-[11px] font-bold text-white shadow-sm transition hover:bg-emerald-700 active:scale-95"
-                        >
-                          Setujui
-                        </button>
-                      </div>
-                    )}
-                    {n.type === 'event_pending' && !n.read && (
-                      <div className="mt-2 flex gap-2">
-                        <button
-                          onClick={(e) => handleAction(e, onRejectEvent, n)}
-                          className="flex-1 rounded-lg border border-rose-200 bg-white py-1.5 text-[11px] font-bold text-rose-700 transition hover:bg-rose-50 active:scale-95"
-                        >
-                          Tolak
-                        </button>
-                        <button
-                          onClick={(e) => handleAction(e, onApproveEvent, n)}
-                          className="flex-1 rounded-lg bg-emerald-600 py-1.5 text-[11px] font-bold text-white shadow-sm transition hover:bg-emerald-700 active:scale-95"
-                        >
-                          Setujui
-                        </button>
-                      </div>
-                    )}
+                      ) : null
+                    })()}
                   </div>
-                </button>
+                  <div className="divide-y divide-slate-100">
+                    {grp.list.map((n) => {
+                      // tampilkan tombol Approve/Tolak kalau masih pending (cek status asli, bukan cuma n.read)
+                      let isPending = false
+                      if (n.type === 'pengajuan_new') {
+                        const p = pengajuan.find((x) => x.id === n.refId)
+                        isPending = p ? p.status === 'pending' : !n.read
+                      } else if (n.type === 'pending_clock_new') {
+                        const pc = pendingClocks.find((x) => x.id === n.refId)
+                        isPending = pc ? pc.status === 'pending' : !n.read
+                      } else if (n.type === 'event_pending') {
+                        isPending = !n.read
+                      }
+                      return (
+                        <div
+                          key={n.id}
+                          onClick={() => handleCardTap(n)}
+                          className={`flex w-full items-start gap-3 px-5 py-3.5 text-left transition hover:bg-slate-50 cursor-pointer ${!n.read ? 'bg-indigo-50/20' : ''}`}
+                        >
+                          <NotifIcon type={n.type} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="truncate text-sm font-bold text-slate-900">{n.title}</p>
+                              <div className="flex items-center gap-1">
+                                {!n.read && <span className="h-2 w-2 flex-shrink-0 rounded-full bg-indigo-600" />}
+                                <button onClick={(e) => handleDismiss(e, n)} className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-500" aria-label="Hapus">
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                </button>
+                              </div>
+                            </div>
+                            <p className="mt-0.5 whitespace-pre-wrap line-clamp-2 text-xs text-slate-600">{n.body}</p>
+                            <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-400">{timeAgo(n.createdAt)}</p>
+                            <div className="mt-2 flex gap-2">
+                              <button onClick={(e) => { e.stopPropagation(); setDetailNotif(n) }} className="flex-1 rounded-lg border border-slate-200 bg-white py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50">
+                                Lihat Detail
+                              </button>
+                              {isPending && (
+                                <>
+                                  <button onClick={(e) => handleAction(e, n.type === 'event_pending' ? onRejectEvent : onReject, n)} className="flex-1 rounded-lg border border-rose-200 bg-white py-1.5 text-[11px] font-bold text-rose-700 hover:bg-rose-50">
+                                    Tolak
+                                  </button>
+                                  <button onClick={(e) => handleAction(e, n.type === 'event_pending' ? onApproveEvent : onApprove, n)} className="flex-1 rounded-lg bg-emerald-600 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-700">
+                                    Setujui
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
               ))}
+              {/* lainnya yang tidak pending tetap tampil di bawah filter all */}
+              {filter === 'all' && groups.lainnya.length > 0 && counts.pengajuan + counts.jam + counts.event > 0 && null}
             </div>
           )}
         </div>
+      </div>
+      {detailNotif && (
+        <NotifDetailModal
+          notif={detailNotif}
+          onClose={() => setDetailNotif(null)}
+          pengajuanList={pengajuan}
+          pendingClocks={pendingClocks}
+          onApprove={onApprove}
+          onReject={onReject}
+          onApproveEvent={onApproveEvent}
+          onRejectEvent={onRejectEvent}
+          onDismiss={onDismiss}
+          navigate={navigate}
+          onCloseDrawer={onClose}
+        />
+      )}
+    </div>
+  )
+}
+
+function NotifDetailModal({ notif, onClose, pengajuanList, pendingClocks, onApprove, onReject, onApproveEvent, onRejectEvent, onDismiss, navigate, onCloseDrawer }) {
+  const n = notif
+  const pengajuan = (pengajuanList || []).find((p) => p.id === n.refId)
+  const pending = (pendingClocks || []).find((p) => p.id === n.refId)
+  const isPengajuan = n.type === 'pengajuan_new'
+  const isJam = n.type === 'pending_clock_new'
+  const isEvent = n.type === 'event_pending'
+  const isStillPending = (() => {
+    if (isPengajuan) return pengajuan ? pengajuan.status === 'pending' : !n.read
+    if (isJam) return pending ? pending.status === 'pending' : !n.read
+    if (isEvent) return !n.read
+    return false
+  })()
+  const handleApprove = () => {
+    if (isEvent) onApproveEvent(n)
+    else onApprove(n)
+    onDismiss(n.id)
+    onClose()
+  }
+  const handleReject = () => {
+    if (isEvent) onRejectEvent(n)
+    else onReject(n)
+    onDismiss(n.id)
+    onClose()
+  }
+  const handleOpenLink = () => {
+    onDismiss(n.id)
+    onClose()
+    onCloseDrawer()
+    // mapping legacy link yang dulu 404
+    let target = n.link
+    if (target === '/admin/pengajuan') target = '/admin?tab=pengajuan'
+    else if (target && target.startsWith('/pengajuan/')) target = '/pengajuan'
+    if (target) {
+      navigate(target)
+      return
+    }
+    if (n.refType === 'event' && n.refId) navigate(`/events/${n.refId}`)
+    else if (n.refType === 'pengajuan' && n.refId) {
+      // pengajuan_new untuk admin → /admin?tab=pengajuan biar langsung buka tab pengajuan
+      if (n.type === 'pengajuan_new') navigate('/admin?tab=pengajuan')
+      else navigate('/pengajuan')
+    }
+  }
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/50 backdrop-blur-sm sm:items-center sm:p-4" onClick={onClose}>
+      <div className="card w-full max-w-mobile max-h-[80vh] overflow-y-auto rounded-t-3xl p-5 sm:rounded-3xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-slate-200 sm:hidden" />
+        <div className="flex items-start gap-3">
+          <NotifIcon type={n.type} />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-base font-bold text-slate-900">{n.title}</h3>
+            <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-600">{n.body}</p>
+            <p className="mt-2 font-mono text-[10px] uppercase tracking-wider text-slate-400">{timeAgo(n.createdAt)}</p>
+          </div>
+        </div>
+        {isPengajuan && pengajuan && (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-xs">
+            <p className="font-bold text-slate-900">{pengajuan.fullName || pengajuan.username} — {pengajuan.type}</p>
+            <p className="mt-1 text-slate-600">Tanggal: {pengajuan.startDate} → {pengajuan.endDate}</p>
+            <p className="mt-1 text-slate-600">Alasan: {pengajuan.reason || '-'}</p>
+            <p className="mt-1 font-mono text-[10px] text-slate-400">Status: {pengajuan.status}</p>
+          </div>
+        )}
+        {isJam && pending && (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-xs">
+            <p className="font-bold text-slate-900">{pending.userId} — {pending.type}</p>
+            <p className="mt-1 text-slate-600">Tanggal: {pending.date} {pending.time}</p>
+            <p className="mt-1 text-slate-600">Alasan: {pending.reason || '-'}</p>
+          </div>
+        )}
+        {isEvent && (
+          <div className="mt-4 rounded-xl border border-violet-200 bg-violet-50/50 p-3 text-xs text-violet-800">
+            Event perlu persetujuan. Buka detail event untuk lihat manpower & PO.
+          </div>
+        )}
+        <div className="mt-4 flex gap-2">
+          <button onClick={onClose} className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-700">Tutup</button>
+          {(n.link || n.refType) && (
+            <button onClick={handleOpenLink} className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-sm font-bold text-white">Buka Detail</button>
+          )}
+        </div>
+        {isStillPending && (
+          <div className="mt-3 flex gap-2">
+            <button onClick={handleReject} className="flex-1 rounded-xl border border-rose-200 bg-white py-2.5 text-sm font-bold text-rose-700">Tolak</button>
+            <button onClick={handleApprove} className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white">Setujui</button>
+          </div>
+        )}
       </div>
     </div>
   )

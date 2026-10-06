@@ -195,7 +195,7 @@ export default function ForgotPasswordPage() {
           </div>
           <h1 className="font-display mt-4 text-2xl font-bold tracking-tight text-slate-900">
             <span className="italic">Prasasti</span>{' '}
-            <span className="text-indigo-600">Group</span>
+            <span className="text-indigo-600">Connect</span>
           </h1>
           <p className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.28em] text-slate-400">
             Reset Password

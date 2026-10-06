@@ -1,0 +1,24 @@
+# HTML selalu segar — browser wajib cek ulang ke server setiap buka,
+# sehingga setiap update langsung tampil tanpa cache lama.
+/
+  Cache-Control: no-cache, no-store, must-revalidate
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+/*.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+# Asset ber-hash (JS/CSS) selalu dicek ulang (no-cache) — kalau tidak berubah
+# server balas 304 (tanpa download ulang). Dengan begitu cache yang rusak
+# (mis. karena race saat deploy) otomatis sembuh sendiri di kunjungan berikutnya,
+# tanpa harus clear site data. Nama file tetap ber-hash tiap build.
+/assets/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Service worker & manifest PWA wajib selalu dicek ulang — kalau ter-cache
+# lama, update aplikasi tidak pernah sampai ke perangkat.
+/sw.js
+  Cache-Control: no-cache, must-revalidate
+/OneSignalSDKWorker.js
+  Cache-Control: no-cache, must-revalidate
+/manifest.webmanifest
+  Cache-Control: no-cache, must-revalidate

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useCallback, useMemo, useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from './AuthContext'
+import { useLeave } from './LeaveContext'
 
 const PengajuanContext = createContext(null)
 
@@ -27,7 +28,8 @@ export function calculateLeaveDays(startDate, endDate) {
 export function PengajuanProvider({ children }) {
   const [pengajuan, setPengajuan] = useState([])
   const [isLoading, setIsLoading] = useState(true)
-  const { currentUser, refreshLeave } = useAuth()
+  const { currentUser } = useAuth()
+  const { refreshLeave } = useLeave()
 
   useEffect(() => {
     if (!currentUser) {

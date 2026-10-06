@@ -1,3 +1,4 @@
+/* build 2026-08-20 */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -6,6 +7,10 @@ html, body, #root {
   height: 100%;
   margin: 0;
   padding: 0;
+}
+
+::selection {
+  background: #e0e7ff;
 }
 
 body {
@@ -384,3 +389,10 @@ body {
 .driver-popover-arrow-side-right.driver-popover-arrow {
   border-color: hsl(var(--popover)) !important;
 }
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  15%, 45%, 75% { transform: translateX(-4px); }
+  30%, 60%, 90% { transform: translateX(4px); }
+}
+.animate-shake { animation: shake 0.32s ease both; }

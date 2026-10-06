@@ -1,0 +1,32 @@
+# Compose untuk TES LOKAL saja (bukan untuk Coolify).
+# Cara pakai: docker compose --env-file .env up --build
+# Lalu: psql "$DATABASE_URL" -f db/schema.sql
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hrms
+      POSTGRES_PASSWORD: hrms
+      POSTGRES_DB: hrms
+    volumes:
+      - hrms-pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  api:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgres://hrms:hrms@db:5432/hrms
+      AUTH_SECRET: ${AUTH_SECRET:-dev-secret-ganti-di-production}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      PORT: 3000
+    ports:
+      - "3000:3000"
+
+volumes:
+  hrms-pgdata:

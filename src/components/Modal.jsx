@@ -18,7 +18,7 @@ export default function Modal({ open, title, onClose, children, footer }) {
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true">
       {/* Backdrop */}
       <button
         type="button"
@@ -26,10 +26,10 @@ export default function Modal({ open, title, onClose, children, footer }) {
         onClick={onClose}
         className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm animate-fade-in"
       />
-      {/* Panel — flex column dengan header & footer fixed, content scrollable */}
-      <div className="relative flex max-h-[90vh] w-full max-w-mobile animate-slide-up flex-col rounded-t-3xl bg-white shadow-2xl sm:max-h-[85vh] sm:rounded-3xl sm:m-4">
+      {/* Panel — flex column dengan header & footer fixed, content scrollable + safe-area */}
+      <div className="relative flex max-h-[92dvh] max-h-[90vh] w-full max-w-mobile animate-slide-up flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:max-h-[85vh] sm:rounded-3xl">
         {/* Header — sticky di atas */}
-        <div className="flex flex-shrink-0 items-center justify-between border-b border-slate-100 px-6 pb-4 pt-5">
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-slate-100 bg-white px-6 pb-4 pt-5">
           <h3 className="text-lg font-bold text-slate-900">{title}</h3>
           <button
             type="button"
@@ -42,11 +42,11 @@ export default function Modal({ open, title, onClose, children, footer }) {
             </svg>
           </button>
         </div>
-        {/* Content — scrollable */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">{children}</div>
-        {/* Footer — sticky di bawah (jika ada) */}
+        {/* Content — scrollable, min-h-0 biar flex-1 bisa menyusut, overscroll-contain biar tidak scroll body */}
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-6 py-4 pb-6" style={{ WebkitOverflowScrolling: 'touch' }}>{children}</div>
+        {/* Footer — sticky di bawah (jika ada) + safe-area */}
         {footer && (
-          <div className="flex-shrink-0 border-t border-slate-100 bg-white px-6 pb-5 pt-4">
+          <div className="flex-shrink-0 border-t border-slate-100 bg-white px-6 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 sm:pb-5">
             {footer}
           </div>
         )}

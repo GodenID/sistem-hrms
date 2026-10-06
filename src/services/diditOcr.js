@@ -1,52 +1,66 @@
 // Layanan OCR KTP via Didit.me
 // ============================================================
-// Dua mode operasi:
-//   1. REAL mode:  aktif bila env var VITE_DIDIT_API_KEY di-set.
-//                  Panggil POST https://verification.didit.me/v3/id-verification/
-//                  dengan header x-api-key. Endpoint ini menerima multipart/form-data
-//                  (front_image = foto KTP) dan mengembalikan field identitas hasil OCR.
-//                  ⚠️ Karena project ini murni client-side (tanpa backend), API key
-//                  akan terekspos di bundle. Untuk produksi, panggil endpoint ini dari
-//                  server-side proxy Anda, BUKAN langsung dari browser.
-//   2. DEMO mode:  fallback bila VITE_DIDIT_API_KEY tidak di-set. Mensimulasikan
-//                  panggilan OCR dengan delay + data KTP realistis (acak) supaya
-//                  halaman register bisa diuji end-to-end tanpa kunci API.
+// Semua panggilan ke Didit dilakukan lewat proxy server-side
+// (Pages Functions: POST /api/didit/verify). Browser tidak pernah
+// menyentuh verification.didit.me langsung, sehingga tidak ada
+// masalah CORS dan API key tidak pernah berada di bundle.
+//
+//   REAL mode: worker punya env DIDIT_API_KEY (Pages secret).
+//              Worker meneruskan multipart/form-data
+//              (front_image = foto KTP) ke Didit dengan header
+//              x-api-key, lalu mengembalikan hasil OCR.
 //
 // Referensi Didit.me:
 //   - https://docs.didit.me/standalone-apis/id-verification
 //   - https://docs.didit.me/core-technology/id-verification/overview
 // ============================================================
 
-const DIDIT_ENDPOINT = 'https://verification.didit.me/v3/id-verification/'
+const DIDIT_PROXY = '/api/didit/verify'
 
-function getApiKey() {
-  // Vite inject env var ber-prefix VITE_ ke import.meta.env saat build.
-  const key = import.meta.env?.VITE_DIDIT_API_KEY
-  return typeof key === 'string' && key.trim().length > 0 ? key.trim() : null
+// Buat sesi verifikasi baru (workflow Didit). Mengembalikan
+// { sessionId, url, status } — user menyelesaikan verifikasi di `url`,
+// hasilnya dikirim ke webhook kita dan dibaca lewat getDiditDecision().
+export async function createDiditSession(vendorData) {
+  const res = await fetch('/api/didit/session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ vendorData }),
+  })
+  const j = await res.json().catch(() => null)
+  if (!res.ok) {
+    throw new Error(j?.error || `Gagal membuat sesi verifikasi (${res.status}).`)
+  }
+  return { sessionId: j?.sessionId ?? null, url: j?.url ?? null, status: j?.status ?? 'created' }
 }
 
-export function isDiditRealMode() {
-  return Boolean(getApiKey())
+// Ambil hasil (decision) sesi verifikasi dari worker.
+export async function getDiditDecision(sessionId) {
+  const res = await fetch(`/api/didit/decision?sessionId=${encodeURIComponent(sessionId)}`)
+  const j = await res.json().catch(() => null)
+  if (!res.ok) {
+    throw new Error(j?.error || `Gagal mengambil hasil verifikasi (${res.status}).`)
+  }
+  return j
 }
 
 // Pemetaan respons Didit → shape internal kita.
 // Field Indonesian KTP dari Didit: full_name, date_of_birth, place_of_birth,
 // nationality, sex, address, identification_number (NIK), document_type, dll.
+function pickStr(...vals) {
+  for (const v of vals) {
+    if (typeof v === 'string' && v.trim()) return v.trim()
+    if (v && typeof v === 'object' && typeof v.value === 'string' && v.value.trim()) {
+      return v.value.trim()
+    }
+  }
+  return ''
+}
+
 function mapDiditResponse(json) {
   // Standalone OCR mengembalikan object id_verification (singular)
   const doc = json?.id_verification || json?.data?.id_verification || json
   const status = (json?.status || doc?.status || 'Approved').toString()
   const fields = doc?.extracted_fields || doc?.fields || doc?.data?.fields || {}
-
-  const pickStr = (...vals) => {
-    for (const v of vals) {
-      if (typeof v === 'string' && v.trim()) return v.trim()
-      if (v && typeof v === 'object' && typeof v.value === 'string' && v.value.trim()) {
-        return v.value.trim()
-      }
-    }
-    return ''
-  }
 
   const fullName =
     pickStr(fields.full_name, fields.name, doc?.full_name, doc?.holder_name) || ''
@@ -82,53 +96,32 @@ function mapDiditResponse(json) {
   }
 }
 
-// Hasil simulasi OCR untuk mode demo.
-// Mengambil nama file sebagai seed agar hasil deterministik per upload,
-// sehingga developer bisa menguji "upload ulang dapat data sama".
-function buildDemoResult(file) {
-  const seedSource = (file?.name || 'demo-ktp') + (file?.size || 0)
-  let seed = 0
-  for (let i = 0; i < seedSource.length; i++) seed = (seed * 31 + seedSource.charCodeAt(i)) >>> 0
-
-  const firstNames = ['Budi', 'Sari', 'Andi', 'Dewi', 'Putri', 'Agus', 'Rina', 'Eko', 'Fitri', 'Hadi']
-  const middleNames = ['Kusuma', 'Wijaya', 'Pratama', 'Lestari', 'Nugroho', 'Saputra', 'Anggraini']
-  const lastNames = ['Santoso', 'Wibowo', 'Setiawan', 'Suharto', 'Handayani', 'Permadi', 'Maulana']
-  const cities = ['Jakarta', 'Bandung', 'Surabaya', 'Yogyakarta', 'Semarang', 'Medan', 'Makassar']
-  const streets = ['Jl. Merdeka', 'Jl. Sudirman', 'Jl. Diponegoro', 'Jl. Ahmad Yani', 'Jl. Gatot Subroto']
-
-  const pick = (arr) => arr[seed % arr.length]
-  const pickN = (arr, n) => {
-    let s = seed >>> 1
-    const out = []
-    for (let i = 0; i < n && arr.length > 0; i++) {
-      s = (s * 1103515245 + 12345) >>> 0
-      out.push(arr[s % arr.length])
-    }
-    return out.join(' ')
-  }
-
-  const fullName = `${pickN(firstNames, 1)} ${pick(middleNames)} ${pick(lastNames)}`
-  const nik = String(((seed * 9301 + 49297) % 9_000_000_000_000_000) + 1_000_000_000_000_000).slice(-16)
-  const birthYear = 1965 + (seed % 35)
-  const birthMonth = ((seed >>> 3) % 12) + 1
-  const birthDay = ((seed >>> 7) % 27) + 1
-  const dateOfBirth = `${birthYear}-${String(birthMonth).padStart(2, '0')}-${String(birthDay).padStart(2, '0')}`
-  const placeOfBirth = pick(cities)
-  const sex = seed % 2 === 0 ? 'M' : 'F'
-  const address = `${pick(streets)} No. ${(seed >>> 5) % 200 + 1}, ${pick(cities)}`
-
+// Ekstrak hasil verifikasi dari decision sesi (kontrak V3: array plural).
+// `body` bisa berupa object decision langsung atau envelope webhook/API.
+export function extractDiditVerification(body) {
+  const decision =
+    body && typeof body === 'object' && body.decision && typeof body.decision === 'object'
+      ? body.decision
+      : body
+  const idVer = Array.isArray(decision?.id_verifications) ? decision.id_verifications[0] : null
+  if (!idVer) return mapDiditResponse(body)
+  const src = idVer.extracted_fields || idVer.fields || idVer.data || {}
   return {
-    status: 'Approved',
-    documentType: 'idn_residential_identity_card',
-    fullName,
-    nik,
-    placeOfBirth,
-    dateOfBirth,
-    sex,
-    address,
-    warnings: [],
-    raw: null,
-    demo: true,
+    status: String(idVer.status || decision.status || ''),
+    documentType: String(idVer.document_type || ''),
+    fullName: pickStr(src.full_name, src.name, idVer.full_name, idVer.name),
+    nik: pickStr(
+      src.identification_number,
+      src.document_number,
+      idVer.identification_number,
+      idVer.document_number,
+    ).replace(/\D/g, ''),
+    placeOfBirth: pickStr(src.place_of_birth, idVer.place_of_birth),
+    dateOfBirth: pickStr(src.date_of_birth, idVer.date_of_birth),
+    sex: pickStr(src.sex, idVer.sex).toUpperCase(),
+    address: pickStr(src.address, idVer.address),
+    warnings: Array.isArray(idVer.warnings) ? idVer.warnings : [],
+    raw: body,
   }
 }
 
@@ -157,41 +150,18 @@ export function readFileAsDataUrl(file) {
 }
 
 // Entry point utama: jalankan OCR KTP terhadap file yang di-upload.
-// Mengembalikan { status, fullName, nik, placeOfBirth, dateOfBirth, sex, address, warnings, demo }.
+// Mengembalikan { status, fullName, nik, placeOfBirth, dateOfBirth, sex, address, warnings }.
 export async function scanKtp(file, { signal } = {}) {
-  const key = getApiKey()
-  if (!key) {
-    // Mode demo: simulasi panggilan jaringan 1.2-2 detik agar UX terasa realistis.
-    await new Promise((res) => setTimeout(res, 1200 + Math.random() * 800))
-    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-    return buildDemoResult(file)
-  }
-
-  // Mode real: panggil endpoint standalone ID verification.
   const form = new FormData()
   form.append('front_image', file)
   form.append('vendor_data', `register-${Date.now()}`)
   form.append('consent', 'true')
 
-  const res = await fetch(DIDIT_ENDPOINT, {
+  const res = await fetch(DIDIT_PROXY, {
     method: 'POST',
-    headers: { 'x-api-key': key },
     body: form,
     signal,
   })
-
-  if (!res.ok) {
-    let detail = ''
-    try {
-      const errBody = await res.json()
-      detail = errBody?.detail || errBody?.message || JSON.stringify(errBody)
-    } catch {
-      detail = await res.text().catch(() => '')
-    }
-    throw new Error(
-      `Didit OCR gagal (${res.status}): ${detail || 'respons tidak valid.'}`,
-    )
-  }
 
   const json = await res.json()
   const mapped = mapDiditResponse(json)

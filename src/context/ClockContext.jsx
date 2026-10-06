@@ -30,9 +30,13 @@ export function ClockProvider({ children }) {
       setIsLoading(false)
       return
     }
+    setIsLoading(true)
     let cancelled = false
+    const isAdmin = currentUser.role === 'admin' || currentUser.role === 'superadmin'
     Promise.all([
-      api(`/clock/history?userId=${currentUser.id}`).catch(() => ({ history: [] })),
+      // Admin: ambil riwayat SEMUA karyawan (untuk tab Absensi admin & modal
+      // detail karyawan). Karyawan biasa: hanya riwayat sendiri.
+      api(isAdmin ? '/clock/history' : `/clock/history?userId=${currentUser.id}`).catch(() => ({ history: [] })),
       api('/clock/pending').catch(() => ({ pending: [] })),
     ])
       .then(([h, p]) => {
@@ -53,43 +57,43 @@ export function ClockProvider({ children }) {
     return list.find((h) => h.date === today && h.userId === (currentUser?.id || 'unknown')) || { date: today, clockIn: null, clockOut: null }
   }, [history, today, currentUser])
 
-  const doClockIn = useCallback(async () => {
-    if (!currentUser) return
-    const now = new Date()
-    const time = formatTimeIndonesia(now)
+  const doClockIn = useCallback(async ({ lat, lng } = {}) => {
+    if (!currentUser) return { ok: false, error: 'Belum login' }
     try {
-      const { record } = await api('/clock/in', {
+      const { record, location } = await api('/clock/in', {
         method: 'POST',
-        body: { userId: currentUser.id, date: today, time },
+        body: { userId: currentUser.id, ...(lat != null ? { lat, lng } : {}) },
       })
       setHistory((prev) => {
         const list = prev || []
         const filtered = list.filter((h) => !(h.date === record.date && h.userId === currentUser.id))
         return [...filtered, record]
       })
+      return { ok: true, record, location }
     } catch (err) {
       console.error('Clock in gagal:', err.message)
+      return { ok: false, error: err.message, code: err.code }
     }
-  }, [currentUser, today])
+  }, [currentUser])
 
-  const doClockOut = useCallback(async () => {
-    if (!currentUser) return
-    const now = new Date()
-    const time = formatTimeIndonesia(now)
+  const doClockOut = useCallback(async ({ lat, lng } = {}) => {
+    if (!currentUser) return { ok: false, error: 'Belum login' }
     try {
-      const { record } = await api('/clock/out', {
+      const { record, location } = await api('/clock/out', {
         method: 'POST',
-        body: { userId: currentUser.id, date: today, time },
+        body: { userId: currentUser.id, ...(lat != null ? { lat, lng } : {}) },
       })
       setHistory((prev) => {
         const list = prev || []
         const filtered = list.filter((h) => !(h.date === record.date && h.userId === currentUser.id))
         return [...filtered, record]
       })
+      return { ok: true, record, location }
     } catch (err) {
       console.error('Clock out gagal:', err.message)
+      return { ok: false, error: err.message, code: err.code }
     }
-  }, [currentUser, today])
+  }, [currentUser])
 
   const getHistoryByDateRange = useCallback(
     (startKey, endKey) => {

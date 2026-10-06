@@ -1,0 +1,6 @@
+# Asset yang tidak ada harus 404 (bukan fallback HTML) supaya tidak pernah
+# muncul error "MIME type text/html" saat cache browser mencampur versi lama.
+/assets/*
+  /index.html   404
+
+/*    /index.html   200

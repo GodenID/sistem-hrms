@@ -129,8 +129,10 @@ export function EventsProvider({ children }) {
     try {
       const res = await api('/events/po-thresholds', { method: 'PUT', body: thresholds })
       setPoThresholds(res.thresholds || thresholds)
+      return { ok: true }
     } catch (err) {
       console.error('Set PO thresholds gagal:', err.message)
+      return { ok: false, error: err.message }
     }
   }, [])
 

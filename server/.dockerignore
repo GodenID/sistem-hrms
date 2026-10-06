@@ -1,0 +1,4 @@
+server/node_modules
+server/src/gen
+server/.env
+server/.env.local

@@ -8,6 +8,10 @@ dist/
 .env
 .env.local
 .env.*.local
+server/.env
+
+# Generated (hasil npm run sync dari functions/lib)
+server/src/gen/
 
 # Logs
 logs/
@@ -20,3 +24,6 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/

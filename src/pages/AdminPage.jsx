@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useUsers } from '../context/UsersContext'
+import { useLeave } from '../context/LeaveContext'
 import { useClock } from '../context/ClockContext'
 import { useEvents } from '../context/EventsContext'
 import { usePengajuan } from '../context/PengajuanContext'
@@ -9,8 +11,12 @@ import { useHolidays } from '../context/HolidaysContext'
 import { useNotifications } from '../context/NotificationsContext'
 import { useToast } from '../context/ToastContext'
 import Pagination from '../components/Pagination'
-import { exportAbsensiToExcel, exportEventsToExcel } from '../utils/excelExport'
+import { SkeletonCard, SkeletonStats } from '../components/Skeleton'
+import { Highlight, fuzzyMatch } from '../utils/search'
+import { exportAbsensiToExcel, exportEventsToExcel, exportOkrToExcel, exportGlobalToExcel } from '../utils/excelExport'
+import { formatCalendarMonthRange, getCurrentPeriod, getPeriodRange, formatPeriodRange } from '../utils/period'
 import { sexLabel } from '../services/diditOcr'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid } from 'recharts'
 import {
   validateUsername,
   validatePassword,
@@ -24,6 +30,8 @@ import {
   DIVISION_OPTIONS,
 } from '../utils/validation'
 import LocationsTab from '../components/LocationsTab'
+import { api } from '../services/api'
+import { useLocation } from 'react-router-dom'
 const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
 
 function formatEventDate(dateStr) {
@@ -40,32 +48,76 @@ function formatDateRange(start, end) {
   if (start === end || !end) return s
   return `${s} — ${e}`
 }
+
+function formatIndoLongDate(dateStr) {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr + 'T00:00:00')
+  if (Number.isNaN(d.getTime())) return dateStr
+  return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })
+}
+
 import Modal from '../components/Modal'
 import ConfirmModal from '../components/ConfirmModal'
 import Avatar from '../components/Avatar'
 
-const TABS = [
-  { id: 'users', label: 'Karyawan' },
-  { id: 'kpi', label: 'OKR' },
-  { id: 'pengajuan', label: 'Pengajuan' },
-  { id: 'absensi', label: 'Absensi' },
-  { id: 'events', label: 'Event' },
-  { id: 'pengumuman', label: 'Info' },
-  { id: 'libur', label: 'Libur' },
-  { id: 'lokasi', label: 'Lokasi' },
+const TAB_GROUPS = [
+  {
+    id: 'utama',
+    label: 'Utama',
+    tabs: [
+      { id: 'users', label: 'Karyawan' },
+      { id: 'kpi', label: 'OKR Master' },
+      { id: 'laporan-okr', label: 'Report OKR' },
+      { id: 'pengajuan', label: 'Pengajuan' },
+      { id: 'absensi', label: 'Absensi' },
+    ],
+  },
+  {
+    id: 'manajemen',
+    label: 'Manajemen',
+    tabs: [
+      { id: 'events', label: 'Event' },
+      { id: 'pengumuman', label: 'Info' },
+      { id: 'libur', label: 'Libur' },
+      { id: 'lokasi', label: 'Lokasi' },
+    ],
+  },
+  {
+    id: 'sistem',
+    label: 'Sistem',
+    tabs: [
+      { id: 'pengaturan', label: 'Pengaturan' },
+      { id: 'aktivitas', label: 'Aktivitas' },
+    ],
+  },
 ]
+
+const TAB_ICONS = {
+  users: <path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />,
+  kpi: <path d="M12 6.75a.75.75 0 01.75.75v2.25a.75.75 0 01-.75.75h-2.25a.75.75 0 01-.75-.75V7.5a.75.75 0 01.75-.75H12zM9 12a3 3 0 013 3v1.5a.75.75 0 01-.75.75h-1.5A.75.75 0 019 16.5V15a3 3 0 013-3zM12 12a3 3 0 013 3v1.5a.75.75 0 01-.75.75h-1.5a.75.75 0 01-.75-.75V15a3 3 0 013-3z" />,
+  'laporan-okr': <path d="M3 3v18h18M7 16l3-3 3 3 5-5" />,
+  pengajuan: <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />,
+  absensi: <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />,
+  events: <path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />,
+  pengumuman: <path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />,
+  libur: <path d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2z" />,
+  lokasi: <path d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z" />,
+  pengaturan: <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z" />,
+  aktivitas: <path d="M13 10V3L4 14h7v7l9-11h-7z" />,
+  superadmin: <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />,
+}
 
 // ============================================================
 // STATS CARDS (top of AdminPage)
 // ============================================================
 function StatsCards() {
-  const { users } = useAuth()
+  const { users } = useUsers()
   const { pengajuan } = usePengajuan()
   const { events } = useEvents()
   const { getUpcomingHolidays } = useHolidays()
 
   const pendingCount = pengajuan.filter((p) => p.status === 'pending').length
-  const adminCount = users.filter((u) => u.role === 'admin').length
+  const adminCount = users.filter((u) => u.role === 'admin' || u.role === 'superadmin').length
 
   const now = new Date()
   const eventsThisMonth = events.filter((e) => {
@@ -150,7 +202,7 @@ function StatsCards() {
 }
 
 function RoleBadge({ role }) {
-  if (role === 'admin') {
+  if (role === 'admin' || role === 'superadmin') {
     return <span className="chip border border-violet-200 bg-violet-50 text-violet-700"><span className="h-1.5 w-1.5 rounded-full bg-violet-500" />Admin</span>
   }
   return <span className="chip border border-slate-200 bg-slate-50 text-slate-600"><span className="h-1.5 w-1.5 rounded-full bg-slate-400" />Karyawan</span>
@@ -169,28 +221,31 @@ function StatusBadge({ status }) {
 // ============================================================
 // USERS TAB
 // ============================================================
-const USERS_PAGE_SIZE = 20
+const USERS_PAGE_SIZE = 5
 
 function UsersTab() {
-  const { users, updateUser, setUserRole, currentUser, register, adjustLeaveQuota, getLeaveBalance, setLeaveQuota } = useAuth()
+  const { users, updateUser, setUserRole, deleteUser } = useUsers()
+  const { currentUser, register, isSuperadmin } = useAuth()
+  const { adjustLeaveQuota, getLeaveBalance, setLeaveQuota } = useLeave()
   const toast = useToast()
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState(null)
   const [pendingRoleToggle, setPendingRoleToggle] = useState(null)
+  const [pendingDelete, setPendingDelete] = useState(null)
   const [selectedUser, setSelectedUser] = useState(null)
   const [creating, setCreating] = useState(false)
   const [bulkAdjustOpen, setBulkAdjustOpen] = useState(false)
   const [userPage, setUserPage] = useState(1)
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return users
+    if (!search.trim()) return users
     return users.filter((u) =>
-      [u.fullName, u.username, u.division, u.nik].some((f) => String(f || '').toLowerCase().includes(q))
+      [u.fullName, u.username, u.division, u.nik].some((f) => fuzzyMatch(f, search))
     )
   }, [users, search])
 
   const adminCount = useMemo(() => users.filter((u) => u.role === 'admin').length, [users])
+  const superadminCount = useMemo(() => users.filter((u) => u.role === 'superadmin').length, [users])
 
   const paginatedUsers = useMemo(() => {
     const totalPages = Math.ceil(filtered.length / USERS_PAGE_SIZE)
@@ -215,23 +270,48 @@ function UsersTab() {
     return result
   }
 
+  // Siklus role: superadmin bisa employee → admin → superadmin → employee.
+  // Admin biasa hanya bisa employee ↔ admin.
+  const nextRoleFor = (u) => {
+    if (!isSuperadmin) return u.role === 'admin' ? 'employee' : 'admin'
+    if (u.role === 'employee') return 'admin'
+    if (u.role === 'admin') return 'superadmin'
+    return 'employee'
+  }
+
+  const roleLabel = (role) => (role === 'admin' || role === 'superadmin' ? 'Admin' : 'Karyawan')
+
   const requestToggleRole = (u) => {
     if (u.id === currentUser?.id) return
-    // Anti-lockout: cannot demote the last remaining admin
+    // Anti-lockout: tidak bisa demote admin/superadmin terakhir
     if (u.role === 'admin' && adminCount <= 1) return
+    if (u.role === 'superadmin' && superadminCount <= 1) return
     setPendingRoleToggle(u)
   }
 
   const confirmToggleRole = async () => {
     if (!pendingRoleToggle) return
-    const wasAdmin = pendingRoleToggle.role === 'admin'
-    await setUserRole(pendingRoleToggle.id, wasAdmin ? 'employee' : 'admin')
+    const next = nextRoleFor(pendingRoleToggle)
+    await setUserRole(pendingRoleToggle.id, next)
     setPendingRoleToggle(null)
-    toast.success(`${pendingRoleToggle.fullName} sekarang ${wasAdmin ? 'Karyawan' : 'Admin'}.`)
+    toast.success(`${pendingRoleToggle.fullName} sekarang ${roleLabel(next)}.`)
+  }
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return
+    const res = await deleteUser(pendingDelete.id)
+    if (res.ok) {
+      toast.success(`${pendingDelete.fullName || pendingDelete.username} berhasil dihapus.`)
+      setPendingDelete(null)
+    } else {
+      toast.error(res.error || 'Gagal menghapus user')
+    }
   }
 
   const isLastAdmin = pendingRoleToggle?.role === 'admin' && adminCount <= 1
-  const isPromote = pendingRoleToggle?.role === 'employee'
+  const isLastSuperadmin = pendingRoleToggle?.role === 'superadmin' && superadminCount <= 1
+  const nextRole = pendingRoleToggle ? nextRoleFor(pendingRoleToggle) : null
+  const isDemote = pendingRoleToggle ? nextRole !== 'admin' && nextRole !== 'superadmin' : false
 
   return (
     <div className="space-y-3">
@@ -272,8 +352,15 @@ function UsersTab() {
 
       <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-400">{filtered.length} karyawan</p>
 
-      <div className="space-y-2">
-        {paginatedUsers.items.map((u) => (
+      {users.length === 0 ? (
+        <div className="space-y-2">
+          {[0, 1, 2].map((i) => (
+            <SkeletonCard key={i} />
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {paginatedUsers.items.map((u) => (
           <div
             key={u.id}
             onClick={() => setSelectedUser(u)}
@@ -282,13 +369,13 @@ function UsersTab() {
             <Avatar name={u.fullName} color={u.avatarColor} photo={u.photo} />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <p className="truncate text-sm font-bold text-slate-900">{u.fullName}</p>
+                <p className="truncate text-sm font-bold text-slate-900"><Highlight text={u.fullName} query={search} /></p>
                 <RoleBadge role={u.role} />
               </div>
-              <p className="truncate font-mono text-[11px] text-slate-500">@{u.username}</p>
+              <p className="truncate font-mono text-[11px] text-slate-500">@<Highlight text={u.username} query={search} /></p>
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
-                <span>NIK: <span className="font-mono font-medium text-slate-700">{u.nik || '—'}</span></span>
-                <span>Div: <span className="font-medium text-slate-700">{u.division || '—'}</span></span>
+                <span>NIK: <span className="font-mono font-medium text-slate-700"><Highlight text={u.nik || '—'} query={search} /></span></span>
+                <span>Div: <span className="font-medium text-slate-700"><Highlight text={u.division || '—'} query={search} /></span></span>
               </div>
             </div>
             <div className="flex flex-shrink-0 flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
@@ -298,19 +385,35 @@ function UsersTab() {
               >
                 Edit
               </button>
+              {!(u.role === 'superadmin' && !isSuperadmin) && (
+                <button
+                  onClick={() => requestToggleRole(u)}
+                  disabled={
+                    u.id === currentUser?.id ||
+                    (u.role === 'admin' && adminCount <= 1) ||
+                    (u.role === 'superadmin' && superadminCount <= 1)
+                  }
+                  className="rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-bold text-violet-700 transition hover:bg-violet-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                  title={
+                    u.id === currentUser?.id
+                      ? 'Anda tidak dapat mengubah role sendiri'
+                      : u.role === 'admin' && adminCount <= 1
+                      ? 'Tidak dapat demote admin terakhir'
+                      : u.role === 'superadmin' && superadminCount <= 1
+                      ? 'Tidak dapat demote superadmin terakhir'
+                      : ''
+                  }
+                >
+                  → {roleLabel(nextRoleFor(u))}
+                </button>
+              )}
               <button
-                onClick={() => requestToggleRole(u)}
-                disabled={u.id === currentUser?.id || (u.role === 'admin' && adminCount <= 1)}
-                className="rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-bold text-violet-700 transition hover:bg-violet-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
-                title={
-                  u.id === currentUser?.id
-                    ? 'Anda tidak dapat mengubah role sendiri'
-                    : u.role === 'admin' && adminCount <= 1
-                    ? 'Tidak dapat demote admin terakhir'
-                    : ''
-                }
+                onClick={() => setPendingDelete(u)}
+                disabled={u.id === currentUser?.id || (u.role === 'superadmin' && !isSuperadmin)}
+                className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-bold text-rose-700 transition hover:bg-rose-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                title={u.id === currentUser?.id ? 'Tidak dapat hapus akun sendiri' : u.role === 'superadmin' && !isSuperadmin ? 'Hanya superadmin bisa hapus superadmin' : 'Hapus user'}
               >
-                {u.role === 'admin' ? '→ Karyawan' : '→ Admin'}
+                Hapus
               </button>
             </div>
           </div>
@@ -321,6 +424,7 @@ function UsersTab() {
           </div>
         )}
       </div>
+        )}
 
       <Pagination page={paginatedUsers.page} totalPages={paginatedUsers.totalPages} onPageChange={setUserPage} />
 
@@ -376,21 +480,42 @@ function UsersTab() {
         open={!!pendingRoleToggle}
         onClose={() => setPendingRoleToggle(null)}
         onConfirm={confirmToggleRole}
-        title={isPromote ? 'Promosikan ke Admin?' : 'Demote ke Karyawan?'}
+        title={
+          nextRole === 'superadmin'
+            ? 'Promosikan ke Superadmin?'
+            : nextRole === 'admin'
+            ? 'Promosikan ke Admin?'
+            : 'Demote ke Karyawan?'
+        }
         message={
           pendingRoleToggle
-            ? `Anda akan mengubah role ${pendingRoleToggle.fullName || pendingRoleToggle.username} dari ${isPromote ? 'Karyawan' : 'Admin'} menjadi ${isPromote ? 'Admin' : 'Karyawan'}.`
+            ? `Anda akan mengubah role ${pendingRoleToggle.fullName || pendingRoleToggle.username} dari ${roleLabel(pendingRoleToggle.role)} menjadi ${roleLabel(nextRole)}.`
             : ''
         }
         detail={
-          isLastAdmin
+          isLastSuperadmin
+            ? 'PERINGATAN: Ini adalah superadmin terakhir di sistem. Setelah didemote, tidak akan ada superadmin lain yang tersisa.'
+            : isLastAdmin
             ? 'PERINGATAN: Ini adalah admin terakhir di sistem. Setelah didemote, tidak akan ada admin lain yang tersisa.'
-            : isPromote
+            : nextRole === 'superadmin'
+            ? 'User ini akan mendapat kekuatan penuh: mengelola semua role (termasuk superadmin lain), reset password siapa pun, ubah saldo cuti siapa pun, dan hapus user mana pun.'
+            : nextRole === 'admin'
             ? 'User ini akan mendapat akses penuh ke Admin Panel, termasuk mengelola karyawan lain, approve/reject pengajuan, dan mengelola event.'
             : 'User ini akan kehilangan akses ke Admin Panel.'
         }
-        confirmLabel={isPromote ? 'Promosikan' : 'Demote'}
-        variant={isLastAdmin ? 'danger' : 'warning'}
+        confirmLabel={nextRole === 'superadmin' ? 'Promosikan' : nextRole === 'admin' ? 'Promosikan' : 'Demote'}
+        variant={isLastSuperadmin || isLastAdmin ? 'danger' : 'warning'}
+      />
+
+      <ConfirmModal
+        open={!!pendingDelete}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={confirmDelete}
+        title="Hapus Karyawan?"
+        message={pendingDelete ? `Anda akan menghapus ${pendingDelete.fullName || pendingDelete.username} (@${pendingDelete.username}) beserta semua data absensi & pengajuannya.` : ''}
+        detail="Tindakan ini tidak dapat dibatalkan."
+        confirmLabel="Hapus"
+        variant="danger"
       />
 
       {selectedUser && (
@@ -511,7 +636,21 @@ function EditUserModal({ user, balance, onSave, onClose }) {
   const [phone, setPhone] = useState(user.phone || '')
   const [address, setAddress] = useState(user.address || '')
   const [leaveQuota, setLeaveQuota] = useState(balance?.totalQuota ?? 12)
+  const [primaryJobs, setPrimaryJobs] = useState(() =>
+    Array.isArray(user.primaryJobs) ? user.primaryJobs.map((j) => ({ ...j })) : []
+  )
   const [error, setError] = useState('')
+
+  const updateJob = (idx, patch) => {
+    setPrimaryJobs((prev) => prev.map((j, i) => (i === idx ? { ...j, ...patch } : j)))
+  }
+  const addJob = () => {
+    if (primaryJobs.length >= 3) return
+    setPrimaryJobs((prev) => [...prev, { label: '', unit: 'qty', target: 1 }])
+  }
+  const removeJob = (idx) => {
+    setPrimaryJobs((prev) => prev.filter((_, i) => i !== idx))
+  }
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -521,12 +660,25 @@ function EditUserModal({ user, balance, onSave, onClose }) {
       setError('Kuota cuti harus angka positif.')
       return
     }
+    const cleanedJobs = primaryJobs
+      .map((j) => ({
+        label: String(j.label || '').trim(),
+        unit: j.unit === 'nominal' ? 'nominal' : 'qty',
+        target: Number(j.target),
+      }))
+      .filter((j) => j.label && Number.isFinite(j.target) && j.target >= 1)
+      .slice(0, 3)
+    if (primaryJobs.length > 0 && cleanedJobs.length === 0) {
+      setError('Job utama harus memiliki label dan target minimal 1.')
+      return
+    }
     const result = onSave({
       fullName: fullName.trim(),
       nik: nik.trim(),
       division: division.trim(),
       phone: phone.trim(),
       address: address.trim(),
+      primaryJobs: cleanedJobs,
     }, quotaNum)
     if (result && !result.ok) setError(result.error)
   }
@@ -556,6 +708,70 @@ function EditUserModal({ user, balance, onSave, onClose }) {
           <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Alamat</label>
           <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={2} className="block w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm transition focus:border-indigo-400 focus:outline-none focus:ring-4 focus:ring-indigo-500/10" placeholder="Alamat lengkap" />
         </div>
+
+        <div className="rounded-xl border border-emerald-200/70 bg-emerald-50/40 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <label className="block text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-700">
+              Job Utama ({primaryJobs.length}/3)
+            </label>
+            {primaryJobs.length < 3 && (
+              <button
+                type="button"
+                onClick={addJob}
+                className="rounded-lg border border-emerald-300 bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700 transition hover:bg-emerald-100"
+              >
+                + Tambah
+              </button>
+            )}
+          </div>
+          {primaryJobs.length === 0 ? (
+            <p className="text-xs text-emerald-700/80">
+              Belum ada job utama. Klik "Tambah" untuk menetapkan target harian karyawan.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {primaryJobs.map((j, idx) => (
+                <div key={idx} className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-white p-2">
+                  <input
+                    type="text"
+                    value={j.label || ''}
+                    onChange={(e) => updateJob(idx, { label: e.target.value })}
+                    maxLength={80}
+                    placeholder="Label (mis. Membuat Invoice)"
+                    className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1.5 text-xs"
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    value={j.target || ''}
+                    onChange={(e) => updateJob(idx, { target: e.target.value === '' ? '' : Number(e.target.value) })}
+                    className="w-16 rounded-md border border-slate-200 px-2 py-1.5 text-center font-mono text-xs"
+                  />
+                  <select
+                    value={j.unit || 'qty'}
+                    onChange={(e) => updateJob(idx, { unit: e.target.value })}
+                    className="rounded-md border border-slate-200 px-1 py-1.5 text-xs"
+                  >
+                    <option value="qty">qty</option>
+                    <option value="nominal">Rp</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => removeJob(idx)}
+                    className="rounded-md border border-slate-200 px-2 py-1.5 text-xs text-slate-500 transition hover:border-rose-200 hover:text-rose-600"
+                    aria-label="Hapus job"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="mt-2 text-[10px] text-emerald-700/70">
+            Job utama muncul sebagai tombol di halaman Daily Job. Boleh dikosongkan.
+          </p>
+        </div>
+
         <div className="rounded-xl border border-indigo-200/70 bg-indigo-50/40 p-3">
           <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.14em] text-indigo-700">Kuota Cuti Tahunan</label>
           <div className="flex items-center gap-3">
@@ -930,8 +1146,10 @@ function Checkbox({ checked, onChange, label }) {
 
 function PengajuanTab() {
   const { pengajuan, updateStatus, types } = usePengajuan()
-  const { currentUser, users, getUserById } = useAuth()
+  const { currentUser } = useAuth()
+  const { users, getUserById } = useUsers()
   const { setClockRecord, pendingClocks, approvePendingClock, rejectPendingClock } = useClock()
+  const toast = useToast()
   const [filter, setFilter] = useState('pending')
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState(() => new Set())
@@ -993,6 +1211,7 @@ function PengajuanTab() {
 
   const doApprove = (p) => {
     updateStatus(p.id, 'approved', currentUser)
+    toast.success(`Pengajuan ${p.fullName || p.username} disetujui`)
     if (p.type === 'koreksi' && p.clockInTime && p.clockOutTime) {
       const clockIn = `${p.clockInTime}:00 WIB`
       const clockOut = `${p.clockOutTime}:00 WIB`
@@ -1028,6 +1247,7 @@ function PengajuanTab() {
     })
     if (confirmAction.mode === 'bulk') setSelected(new Set())
     setConfirmAction(null)
+    toast.success(`${ids.length} pengajuan berhasil disetujui`)
   }
 
   const executeReject = () => {
@@ -1037,6 +1257,7 @@ function PengajuanTab() {
     if (confirmAction.mode === 'bulk') setSelected(new Set())
     setConfirmAction(null)
     setRejectReason('')
+    toast.success(`${ids.length} pengajuan ditolak`)
   }
 
   const typeLabel = (id) => types.find((t) => t.id === id)?.label || id
@@ -1065,8 +1286,8 @@ function PengajuanTab() {
                   {pc.reason && <p className="mt-0.5 text-[11px] italic text-slate-500">&ldquo;{pc.reason}&rdquo;</p>}
                 </div>
                 <div className="flex gap-1.5">
-                  <button onClick={() => rejectPendingClock(pc.id)} className="rounded-lg border border-rose-200 bg-white px-2.5 py-1 text-[11px] font-bold text-rose-700 transition hover:bg-rose-50 active:scale-[0.98]">Tolak</button>
-                  <button onClick={() => approvePendingClock(pc.id)} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.98]">Setujui</button>
+                  <button onClick={() => { rejectPendingClock(pc.id); toast.success('Absen luar radius ditolak') }} className="rounded-lg border border-rose-200 bg-white px-2.5 py-1 text-[11px] font-bold text-rose-700 transition hover:bg-rose-50 active:scale-[0.98]">Tolak</button>
+                  <button onClick={() => { approvePendingClock(pc.id); toast.success('Absen luar radius disetujui') }} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.98]">Setujui</button>
                 </div>
               </div>
             ))}
@@ -1266,18 +1487,36 @@ function PengajuanTab() {
 // ABSENSI TAB
 // ============================================================
 function AbsensiTab() {
-  const { history } = useClock()
-  const { users, getUserById } = useAuth()
+  const { history, isLoading } = useClock()
+  const { users, getUserById } = useUsers()
   const { pengajuan } = usePengajuan()
+  const { allHolidays } = useHolidays()
   const [search, setSearch] = useState('')
+  const [dateFilter, setDateFilter] = useState('')
   const today = new Date()
   const [exportMonth, setExportMonth] = useState(today.getMonth() + 1)
   const [exportYear, setExportYear] = useState(today.getFullYear())
+  const [absensiPage, setAbsensiPage] = useState(1)
+  const ABSENSI_PAGE_SIZE = 10
 
-  // Group history by userId
+  // Riwayat di-filter per bulan kalender (1 – akhir bulan), bukan 26–25.
+  // Patokan "buka/tutup buku" diabaikan — semua tampilan & stats sinkron
+  // dengan bulan yang dipilih di dropdown.
+  const monthPrefix = `${exportYear}-${String(exportMonth).padStart(2, '0')}`
+
+  const monthHistory = useMemo(
+    () => history.filter((h) => String(h.date || '').startsWith(monthPrefix)),
+    [history, monthPrefix],
+  )
+
+  // Group history by userId — SEMUA karyawan selalu muncul (termasuk yang
+  // belum punya record di bulan terpilih), history digabung per user.
   const grouped = useMemo(() => {
     const map = new Map()
-    for (const h of history) {
+    for (const u of users) {
+      map.set(u.id, [])
+    }
+    for (const h of monthHistory) {
       const key = h.userId || 'unknown'
       if (!map.has(key)) map.set(key, [])
       map.get(key).push(h)
@@ -1287,20 +1526,27 @@ function AbsensiTab() {
       list.sort((a, b) => b.date.localeCompare(a.date))
     }
     return map
-  }, [history])
+  }, [monthHistory, users])
 
   const filteredEntries = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    const entries = Array.from(grouped.entries())
-    if (!q) return entries
+    let entries = Array.from(grouped.entries())
+    if (dateFilter) {
+      entries = entries.map(([uid, recs]) => [uid, recs.filter((r) => r.date === dateFilter)]).filter(([, recs]) => recs.length > 0)
+    }
+    if (!search.trim()) return entries
     return entries.filter(([userId, records]) => {
       const u = getUserById(userId)
-      return [u?.fullName, u?.username, u?.division, records[0]?.username].some((f) => String(f || '').toLowerCase().includes(q))
+      return [u?.fullName, u?.username, u?.division, u?.nik, records[0]?.username].some((f) => fuzzyMatch(f, search))
     })
-  }, [grouped, search, getUserById])
+  }, [grouped, search, dateFilter, getUserById])
 
-  const totalRecords = history.length
-  const totalDays = new Set(history.map((h) => h.date)).size
+  useEffect(() => { setAbsensiPage(1) }, [search, dateFilter, monthPrefix])
+
+  const totalPages = Math.max(1, Math.ceil(filteredEntries.length / ABSENSI_PAGE_SIZE))
+  const paginatedEntries = filteredEntries.slice((absensiPage - 1) * ABSENSI_PAGE_SIZE, absensiPage * ABSENSI_PAGE_SIZE)
+
+  const totalRecords = monthHistory.length
+  const totalDays = new Set(monthHistory.map((h) => h.date)).size
   const uniqueUsers = grouped.size
 
   const handleExportAbsensi = () => {
@@ -1312,6 +1558,7 @@ function AbsensiTab() {
       users: exportUsers,
       history,
       pengajuan,
+      holidays: allHolidays,
       month: exportMonth,
       year: exportYear,
     })
@@ -1332,7 +1579,7 @@ function AbsensiTab() {
           ))}
         </select>
         <span className="text-[10px] font-medium text-slate-500">
-          {`26 ${MONTH_SHORT[exportMonth - 1]} – 25 ${MONTH_SHORT[exportMonth % 12]} ${exportMonth === 12 ? exportYear + 1 : exportYear}`}
+          {formatCalendarMonthRange(exportMonth, exportYear)}
         </span>
         <button onClick={handleExportAbsensi} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-indigo-700 active:scale-95">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -1342,55 +1589,86 @@ function AbsensiTab() {
         </button>
       </div>
 
-      <div className="card grid grid-cols-3 divide-x divide-slate-200 p-0">
-        <div className="px-3 py-3 text-center">
-          <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-400">Total</p>
-          <p className="mt-0.5 text-xl font-extrabold text-slate-900">{totalRecords}</p>
+      {isLoading ? (
+        <SkeletonStats />
+      ) : (
+        <div className="card grid grid-cols-3 divide-x divide-slate-200 p-0">
+          <div className="px-3 py-3 text-center">
+            <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-400">Total</p>
+            <p className="mt-0.5 text-xl font-extrabold text-slate-900">{totalRecords}</p>
+          </div>
+          <div className="px-3 py-3 text-center">
+            <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-400">Hari</p>
+            <p className="mt-0.5 text-xl font-extrabold text-slate-900">{totalDays}</p>
+          </div>
+          <div className="px-3 py-3 text-center">
+            <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-400">User</p>
+            <p className="mt-0.5 text-xl font-extrabold text-slate-900">{uniqueUsers}</p>
+          </div>
         </div>
-        <div className="px-3 py-3 text-center">
-          <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-400">Hari</p>
-          <p className="mt-0.5 text-xl font-extrabold text-slate-900">{totalDays}</p>
-        </div>
-        <div className="px-3 py-3 text-center">
-          <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-400">User</p>
-          <p className="mt-0.5 text-xl font-extrabold text-slate-900">{uniqueUsers}</p>
-        </div>
-      </div>
+      )}
 
-      <div className="relative">
-        <svg xmlns="http://www.w3.org/2000/svg" className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="block w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-11 pr-4 text-sm text-slate-900 placeholder-slate-400 transition focus:border-indigo-400 focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
-          placeholder="Cari nama, username, divisi..."
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <svg xmlns="http://www.w3.org/2000/svg" className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="block w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-11 pr-4 text-sm text-slate-900 placeholder-slate-400 transition focus:border-indigo-400 focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
+            placeholder="Cari nama, username, divisi, NIK..."
         />
+        </div>
+        <input
+          type="date"
+          value={dateFilter}
+          onChange={(e) => setDateFilter(e.target.value)}
+          className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs"
+          title="Filter tanggal spesifik"
+        />
+        {dateFilter && (
+          <button onClick={() => setDateFilter('')} className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-bold text-slate-500">
+            ✕
+          </button>
+        )}
       </div>
 
-      <div className="space-y-2">
-        {filteredEntries.map(([userId, records]) => {
+      {isLoading ? (
+        <div className="space-y-2">
+          {[0, 1, 2].map((i) => (
+            <SkeletonCard key={i} />
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {paginatedEntries.map(([userId, records]) => {
           const u = getUserById(userId)
-          const completedDays = records.filter((r) => r.clockIn && r.clockOut).length
+          const hadirDays = records.length
+          const lengkapDays = records.filter((r) => r.clockIn && r.clockOut).length
+          const kurang = hadirDays - lengkapDays
           return (
             <details key={userId} className="card overflow-hidden">
               <summary className="flex cursor-pointer items-center gap-3 p-3">
                 <Avatar name={u?.fullName || records[0]?.username || 'Unknown'} color={u?.avatarColor} photo={u?.photo} size="sm" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold text-slate-900">{u?.fullName || records[0]?.username || 'Unknown'}</p>
+                  <p className="truncate text-sm font-bold text-slate-900"><Highlight text={u?.fullName || records[0]?.username || 'Unknown'} query={search} /></p>
                   <p className="font-mono text-[10px] text-slate-400">@{u?.username || records[0]?.username || 'unknown'}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-bold text-slate-900">{records.length}</p>
-                  <p className="font-mono text-[9px] uppercase tracking-wider text-slate-400">{completedDays} complete</p>
+                  <p className="text-sm font-bold text-slate-900">
+                    {hadirDays > 0 ? `${hadirDays} hari` : <span className="text-slate-300">—</span>}
+                  </p>
+                  <p className="font-mono text-[9px] uppercase tracking-wider text-slate-400">
+                    {hadirDays === 0 ? 'belum absen' : kurang === 0 ? 'lengkap' : `${lengkapDays} lengkap · ${kurang} kurang checkout`}
+                  </p>
                 </div>
               </summary>
               <div className="border-t border-slate-100 px-3 py-2">
                 <div className="max-h-48 space-y-1 overflow-y-auto">
                   {records.slice(0, 20).map((r) => (
                     <div key={`${r.userId}-${r.date}`} className="flex items-center justify-between rounded-lg bg-slate-50/60 px-2.5 py-1.5 text-xs">
-                      <span className="font-mono text-slate-600">{r.date}</span>
+                      <span className="text-slate-600">{formatIndoLongDate(r.date)}</span>
                       <span className="flex items-center gap-2">
                         <span className="text-emerald-700">{r.clockIn || '—'}</span>
                         <span className="text-slate-300">→</span>
@@ -1414,7 +1692,11 @@ function AbsensiTab() {
             <p className="text-sm text-slate-500">Tidak ada karyawan yang cocok dengan "{search}".</p>
           </div>
         )}
+      <div className="pt-2">
+        <Pagination page={absensiPage} totalPages={totalPages} onPageChange={setAbsensiPage} />
       </div>
+      </div>
+      )}
     </div>
   )
 }
@@ -1423,7 +1705,7 @@ function AbsensiTab() {
 // EVENTS TAB
 // ============================================================
 function EventsTab() {
-  const { events, createEvent, updateEvent, deleteEvent, poThresholds, setPOThresholds } = useEvents()
+  const { events, createEvent, updateEvent, deleteEvent } = useEvents()
   const { currentUser } = useAuth()
   const toast = useToast()
   const [modal, setModal] = useState(null)
@@ -1431,9 +1713,6 @@ function EventsTab() {
   const today = new Date()
   const [exportMonth, setExportMonth] = useState(today.getMonth() + 1)
   const [exportYear, setExportYear] = useState(today.getFullYear())
-  const [showPOCfg, setShowPOCfg] = useState(false)
-  const [poCfgKecil, setPOCfgKecil] = useState(String(poThresholds?.kecilMax || 50000000))
-  const [poCfgMenengah, setPOCfgMenengah] = useState(String(poThresholds?.menengahMax || 200000000))
 
   const handleExportEvents = () => {
     exportEventsToExcel({
@@ -1473,71 +1752,6 @@ function EventsTab() {
         </svg>
         Buat Event Baru
       </button>
-
-      {/* PO Category Settings */}
-      <div className="rounded-xl border border-slate-200 bg-white">
-        <button
-          onClick={() => setShowPOCfg(!showPOCfg)}
-          className="flex w-full items-center justify-between px-4 py-3 text-left"
-        >
-          <div className="flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-600">Kategori PO</span>
-          </div>
-          <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 text-slate-400 transition ${showPOCfg ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-        {showPOCfg && (
-          <div className="space-y-3 border-t border-slate-100 px-4 pb-4 pt-3">
-            <p className="text-[11px] text-slate-500">Atur batas nominal untuk kategori event berdasarkan nilai PO.</p>
-            <div className="flex items-center gap-2">
-              <label className="w-24 text-[11px] font-bold text-slate-600">Event Kecil</label>
-              <input
-                type="text"
-                value={poCfgKecil ? 'Rp ' + Number(poCfgKecil.replace(/[^0-9]/g, '')).toLocaleString('id-ID') : ''}
-                onChange={(e) => setPOCfgKecil(e.target.value)}
-                className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs transition focus:border-indigo-400 focus:outline-none focus:ring-3 focus:ring-indigo-500/10"
-                placeholder="Rp 0"
-              />
-              <span className="text-[10px] text-slate-400">s.d.</span>
-              <input
-                type="text"
-                value={poCfgMenengah ? 'Rp ' + Number(poCfgMenengah.replace(/[^0-9]/g, '')).toLocaleString('id-ID') : ''}
-                onChange={(e) => setPOCfgMenengah(e.target.value)}
-                className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs transition focus:border-indigo-400 focus:outline-none focus:ring-3 focus:ring-indigo-500/10"
-                placeholder="Rp 0"
-              />
-              <span className="text-[10px] text-slate-400">ke atas</span>
-            </div>
-            <div className="flex items-center gap-2 text-[10px] text-slate-400">
-              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-bold text-emerald-700">Kecil</span>
-              <span>≤ <span className="font-mono">{poCfgKecil ? 'Rp ' + Number(poCfgKecil.replace(/[^0-9]/g, '')).toLocaleString('id-ID') : 'Rp 0'}</span></span>
-              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-bold text-amber-700">Menengah</span>
-              <span>≤ <span className="font-mono">{poCfgMenengah ? 'Rp ' + Number(poCfgMenengah.replace(/[^0-9]/g, '')).toLocaleString('id-ID') : 'Rp 0'}</span></span>
-              <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 font-bold text-rose-700">Besar</span>
-            </div>
-            <button
-              onClick={() => {
-                const kecil = parseInt(poCfgKecil.replace(/[^0-9]/g, ''), 10) || 0
-                const menengah = parseInt(poCfgMenengah.replace(/[^0-9]/g, ''), 10) || 0
-                if (kecil > 0 && menengah > kecil) {
-                  setPOThresholds({ kecilMax: kecil, menengahMax: menengah })
-                  toast.success('Kategori PO berhasil disimpan')
-                } else {
-                  toast.error('Nilai tidak valid. Pastikan Kecil < Menengah')
-                }
-              }}
-              className="w-full rounded-lg bg-indigo-600 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-indigo-700 active:scale-[0.98]"
-            >
-              Simpan
-            </button>
-          </div>
-        )}
-      </div>
 
       {/* Status filter */}
       <div className="flex gap-1.5">
@@ -1797,7 +2011,7 @@ function ManpowerPicker({ users, selected, onChange }) {
 }
 
 function EventFormModal({ title, initial, onSubmit, onCancel }) {
-  const { users } = useAuth()
+  const { users } = useUsers()
   const todayStr = new Date().toISOString().slice(0, 10)
   const [name, setName] = useState(initial?.name || '')
   const [startDate, setStartDate] = useState(initial?.startDate || initial?.date || todayStr)
@@ -1871,14 +2085,30 @@ function timeAgo(isoStr) {
 }
 
 function AnnouncementsTab() {
-  const { announcements, createAnnouncement, updateAnnouncement, deleteAnnouncement, types, typeMeta } = useAnnouncements()
+  const { announcements, createAnnouncement, updateAnnouncement, deleteAnnouncement, fetchReads, types, typeMeta } = useAnnouncements()
   const [modal, setModal] = useState(null) // null | { mode: 'create' } | { mode: 'edit', item }
   const [deleting, setDeleting] = useState(null)
+  const [expandedReads, setExpandedReads] = useState(null)
+  const [readsData, setReadsData] = useState({})
+  const [readsLoading, setReadsLoading] = useState({})
 
   const handleSave = (payload) => {
     if (modal?.mode === 'create') createAnnouncement(payload)
     else if (modal?.mode === 'edit') updateAnnouncement(modal.item.id, payload)
     setModal(null)
+  }
+
+  const toggleReads = async (annId) => {
+    if (expandedReads === annId) {
+      setExpandedReads(null)
+      return
+    }
+    setExpandedReads(annId)
+    if (readsData[annId]) return
+    setReadsLoading((p) => ({ ...p, [annId]: true }))
+    const res = await fetchReads(annId)
+    setReadsLoading((p) => ({ ...p, [annId]: false }))
+    if (res.ok) setReadsData((p) => ({ ...p, [annId]: res.data }))
   }
 
   return (
@@ -1911,6 +2141,57 @@ function AnnouncementsTab() {
                   <p className="mt-1.5 font-mono text-[10px] text-slate-400">
                     oleh {a.createdByName} · {timeAgo(a.createdAt)}{a.updatedAt ? ` · diedit ${timeAgo(a.updatedAt)}` : ''}
                   </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                      ✓ {a.readCount || 0}/{a.totalUsers || 0} dibaca · {a.totalUsers ? Math.round(((a.readCount || 0) / a.totalUsers) * 100) : 0}%
+                    </span>
+                    <button
+                      onClick={() => toggleReads(a.id)}
+                      className="text-[11px] font-bold text-indigo-600 hover:underline"
+                    >
+                      {expandedReads === a.id ? 'Tutup' : 'Lihat siapa'}
+                    </button>
+                  </div>
+                  {expandedReads === a.id && (
+                    <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      {readsLoading[a.id] ? (
+                        <p className="text-center text-xs text-slate-500">Memuat…</p>
+                      ) : readsData[a.id] ? (
+                        <div className="space-y-3">
+                          <div>
+                            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700">Sudah dibaca ({readsData[a.id].readCount})</p>
+                            {readsData[a.id].reads.length === 0 ? (
+                              <p className="text-xs text-slate-500">Belum ada yang membaca.</p>
+                            ) : (
+                              <div className="flex flex-wrap gap-1">
+                                {readsData[a.id].reads.map((r) => (
+                                  <span key={r.userId} className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800">
+                                    {r.fullName || r.username} {r.readAt ? `· ${new Date(r.readAt).toLocaleDateString('id-ID')}` : ''}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Belum dibaca ({readsData[a.id].unread.length})</p>
+                            {readsData[a.id].unread.length === 0 ? (
+                              <p className="text-xs text-emerald-600">Semua sudah membaca ✓</p>
+                            ) : (
+                              <div className="flex flex-wrap gap-1">
+                                {readsData[a.id].unread.map((u) => (
+                                  <span key={u.userId} className="inline-flex items-center rounded-full bg-white border border-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                                    {u.fullName || u.username}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-center text-xs text-slate-500">Gagal memuat data.</p>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="flex flex-shrink-0 flex-col gap-1.5">
                   <button
@@ -2051,20 +2332,16 @@ function AnnouncementFormModal({ title, initial, types, typeMeta, onSave, onCanc
 const HOLIDAY_FILTERS = [
   { id: 'all', label: 'Semua' },
   { id: 'nasional', label: 'Nasional' },
-  { id: 'custom', label: 'Custom' },
   { id: 'upcoming', label: 'Akan Datang' },
 ]
 
 function HolidaysTab() {
-  const { allHolidays, createCustom, updateCustom, deleteCustom, formatHolidayDate, categoryLabel, categoryColor } = useHolidays()
+  const { allHolidays, formatHolidayDate, categoryLabel, categoryColor, refreshHolidays, refreshing } = useHolidays()
   const [filter, setFilter] = useState('all')
-  const [modal, setModal] = useState(null) // null | { mode: 'create' } | { mode: 'edit', item }
-  const [deleting, setDeleting] = useState(null)
 
   const filtered = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10)
     if (filter === 'nasional') return allHolidays.filter((h) => !h.isCustom)
-    if (filter === 'custom') return allHolidays.filter((h) => h.isCustom)
     if (filter === 'upcoming') return allHolidays.filter((h) => h.date >= today)
     return allHolidays
   }, [allHolidays, filter])
@@ -2074,28 +2351,30 @@ function HolidaysTab() {
     return {
       all: allHolidays.length,
       nasional: allHolidays.filter((h) => !h.isCustom).length,
-      custom: allHolidays.filter((h) => h.isCustom).length,
       upcoming: allHolidays.filter((h) => h.date >= today).length,
     }
   }, [allHolidays])
 
-  const handleSave = (payload) => {
-    if (modal?.mode === 'create') createCustom(payload)
-    else if (modal?.mode === 'edit') updateCustom(modal.item.id, payload)
-    setModal(null)
-  }
-
   return (
     <div className="space-y-3">
-      <button
-        onClick={() => setModal({ mode: 'create' })}
-        className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 active:scale-[0.98]"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-        </svg>
-        Tambah Hari Libur
-      </button>
+      <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+        <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-white">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-bold leading-none text-emerald-800">Sinkronisasi Otomatis</p>
+          <p className="mt-0.5 text-[10px] leading-none text-emerald-600">Sumber: API Hari Libur Nasional (api-hari-libur &amp; Nager.Date)</p>
+        </div>
+        <button
+          onClick={() => refreshHolidays()}
+          disabled={refreshing}
+          className="flex-shrink-0 rounded-lg border border-emerald-300 bg-white px-2.5 py-1 text-[11px] font-bold text-emerald-700 transition hover:bg-emerald-50 active:scale-95 disabled:opacity-50"
+        >
+          {refreshing ? 'Menyinkronkan…' : 'Sinkronkan'}
+        </button>
+      </div>
 
       <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
         {HOLIDAY_FILTERS.map((f) => {
@@ -2128,68 +2407,24 @@ function HolidaysTab() {
                 <p className="font-mono text-[10px] text-slate-500">{formatHolidayDate(h.date)}</p>
                 <div className="mt-1 flex flex-wrap gap-1">
                   <span className={`chip border ${categoryColor[h.category] || categoryColor.nasional}`}>{categoryLabel[h.category] || h.category}</span>
-                  {h.isCustom && (
-                    <span className="chip border border-violet-200 bg-violet-50 text-violet-700">
-                      <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />Custom
-                    </span>
-                  )}
+                  <span className="chip border border-emerald-200 bg-emerald-50 text-emerald-700">Otomatis</span>
                 </div>
               </div>
-              {h.isCustom && (
-                <div className="flex flex-shrink-0 flex-col gap-1.5">
-                  <button
-                    onClick={() => setModal({ mode: 'edit', item: h })}
-                    className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 transition hover:bg-slate-50 active:scale-95"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => setDeleting(h)}
-                    className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-bold text-rose-700 transition hover:bg-rose-100 active:scale-95"
-                  >
-                    Hapus
-                  </button>
-                </div>
-              )}
             </div>
           )
         })}
         {filtered.length === 0 && (
           <div className="card flex flex-col items-center justify-center px-6 py-10 text-center">
-            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 text-2xl">
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-2xl">
               📅
             </div>
             <h3 className="text-base font-bold text-slate-900">Tidak ada hari libur</h3>
             <p className="mt-1 text-sm text-slate-500">
-              {filter === 'custom' ? 'Belum ada hari libur custom.' : filter === 'upcoming' ? 'Tidak ada hari libur dalam waktu dekat.' : 'Belum ada data.'}
+              {filter === 'upcoming' ? 'Tidak ada hari libur dalam waktu dekat.' : 'Belum ada data. Coba sinkronkan ulang.'}
             </p>
           </div>
         )}
       </div>
-
-      {modal && (
-        <HolidayFormModal
-          title={modal.mode === 'create' ? 'Tambah Hari Libur' : 'Edit Hari Libur'}
-          initial={modal.mode === 'edit' ? modal.item : null}
-          categoryLabel={categoryLabel}
-          categoryColor={categoryColor}
-          onSave={handleSave}
-          onCancel={() => setModal(null)}
-        />
-      )}
-
-      {deleting && (
-        <ConfirmModal
-          open
-          onClose={() => setDeleting(null)}
-          onConfirm={() => { deleteCustom(deleting.id); setDeleting(null) }}
-          title="Hapus Hari Libur Custom?"
-          message={`Hari libur "${deleting.name}" pada tanggal ${new Date(deleting.date + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })} akan dihapus.`}
-          detail="Tindakan ini tidak dapat dibatalkan. Hari libur nasional bawaan (dari pemerintah) tidak akan terpengaruh."
-          confirmLabel="Hapus"
-          variant="danger"
-        />
-      )}
     </div>
   )
 }
@@ -2544,33 +2779,729 @@ function BulkAdjustQuotaModal({ users, onClose, onConfirm, getLeaveBalance }) {
 
 
 // ============================================================
-// OKR TAB — membuka Sistem OKR (native, tanpa iframe/SSO)
+// OKR MASTER — setting job utama per orang (informatif, mudah edit)
 // ============================================================
+function OkrMasterTab() {
+  const { users, updateUser } = useUsers()
+  const toast = useToast()
+  const [search, setSearch] = useState('')
+  const [editingUser, setEditingUser] = useState(null)
+  const [filter, setFilter] = useState('all') // all | with | without
 
-function OkrTab() {
-  const { currentUser } = useAuth()
+  const stats = useMemo(() => {
+    const total = users.length
+    const withJobs = users.filter((u) => Array.isArray(u.primaryJobs) && u.primaryJobs.length > 0).length
+    const without = total - withJobs
+    const totalJobs = users.reduce((s, u) => s + (Array.isArray(u.primaryJobs) ? u.primaryJobs.length : 0), 0)
+    return { total, withJobs, without, totalJobs }
+  }, [users])
+
+  const filtered = useMemo(() => {
+    let list = users
+    if (filter === 'with') list = list.filter((u) => u.primaryJobs?.length > 0)
+    if (filter === 'without') list = list.filter((u) => !u.primaryJobs || u.primaryJobs.length === 0)
+    const q = search.trim().toLowerCase()
+    if (!q) return list
+    return list.filter((u) => [u.fullName, u.username, u.division].some((f) => String(f || '').toLowerCase().includes(q)))
+  }, [users, search, filter])
+
+  const handleSaveJobs = async (userId, jobs) => {
+    const user = users.find((u) => u.id === userId)
+    if (!user) return { ok: false, error: 'User tidak ditemukan' }
+    const res = await updateUser(userId, { primaryJobs: jobs })
+    if (res.ok) toast.success(`Job ${user.fullName} diperbarui`)
+    else toast.error(res.error || 'Gagal menyimpan')
+    return res
+  }
 
   return (
-    <div className="card animate-fade-in p-6">
-      <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-100 to-fuchsia-100 text-violet-700">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-          </svg>
+    <div className="space-y-4">
+      <div className="card p-4">
+        <h3 className="text-sm font-bold text-slate-900">Kelola Job Utama Karyawan</h3>
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">Atur 1–3 job utama per orang. Tap <b>Edit/Set Job</b> untuk ubah langsung di bawah — tanpa popup modal.</p>
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded-xl bg-slate-50 p-3 text-center"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total Orang</p><p className="mt-1 text-xl font-extrabold text-slate-900">{stats.total}</p></div>
+          <div className="rounded-xl bg-emerald-50 p-3 text-center"><p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Sudah Set</p><p className="mt-1 text-xl font-extrabold text-emerald-700">{stats.withJobs}</p></div>
+          <div className="rounded-xl bg-amber-50 p-3 text-center"><p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Belum Set</p><p className="mt-1 text-xl font-extrabold text-amber-700">{stats.without}</p></div>
+          <div className="rounded-xl bg-violet-50 p-3 text-center"><p className="text-[10px] font-bold uppercase tracking-wider text-violet-700">Total Job</p><p className="mt-1 text-xl font-extrabold text-violet-700">{stats.totalJobs}</p></div>
         </div>
-        <div>
-          <h3 className="text-sm font-bold text-slate-900">Sistem OKR</h3>
-          <p className="mt-0.5 text-xs text-slate-500">
-            Masuk sebagai {currentUser?.fullName || currentUser?.username} — tanpa login ulang
-          </p>
-        </div>
-        <Link
-          to="/okr"
-          className="mt-1 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-violet-700 active:scale-95"
-        >
-          Buka Sistem OKR
-        </Link>
       </div>
+
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <svg xmlns="http://www.w3.org/2000/svg" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari nama, username, divisi..." className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm focus:border-violet-400 focus:outline-none focus:ring-4 focus:ring-violet-500/10" />
+        </div>
+        <select value={filter} onChange={(e) => setFilter(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-700">
+          <option value="all">Semua</option>
+          <option value="with">Sudah Set</option>
+          <option value="without">Belum Set</option>
+        </select>
+      </div>
+
+      <div className="space-y-2">
+        {filtered.map((u) => {
+          const isEditing = editingUser?.id === u.id
+          return (
+            <div key={u.id} className="card overflow-hidden p-0">
+              <div className="flex items-start gap-3 p-4">
+                <Avatar name={u.fullName} color={u.avatarColor} photo={u.photo} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-bold text-slate-900">{u.fullName}</p>
+                  <p className="truncate font-mono text-[11px] text-slate-500">@{u.username} · {u.division || '—'}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {Array.isArray(u.primaryJobs) && u.primaryJobs.length > 0 ? (
+                      u.primaryJobs.map((j, idx) => (
+                        <span key={idx} className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
+                          <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />{j.label}
+                          <span className="rounded-full bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-600">{j.target} {j.unit}</span>
+                        </span>
+                      ))
+                    ) : (
+                      <span className="rounded-full border border-dashed border-slate-300 bg-slate-50 px-2.5 py-1 text-xs text-slate-500">Belum ada job utama</span>
+                    )}
+                  </div>
+                </div>
+                <button onClick={() => setEditingUser(isEditing ? null : u)} className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold ${isEditing ? 'border border-slate-300 bg-slate-100 text-slate-700' : 'border border-violet-200 bg-violet-600 text-white hover:bg-violet-700'}`}>
+                  {isEditing ? 'Tutup' : u.primaryJobs?.length ? 'Edit' : 'Set Job'}
+                </button>
+              </div>
+              {isEditing && (
+                <div className="border-t border-slate-100 bg-slate-50/60 p-4">
+                  <OkrInlineEditor
+                    user={u}
+                    onClose={() => setEditingUser(null)}
+                    onSave={async (jobs) => {
+                      const r = await handleSaveJobs(u.id, jobs)
+                      if (r.ok) setEditingUser(null)
+                      return r
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          )
+        })}
+        {filtered.length === 0 && <div className="card p-6 text-center text-sm text-slate-500">Tidak ada karyawan yang cocok.</div>}
+      </div>
+
+      <Link to="/okr" className="flex w-full items-center justify-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-5 py-3 text-sm font-bold text-violet-700 hover:bg-violet-100">
+        Buka Daily Job sebagai Karyawan →
+      </Link>
+    </div>
+  )
+}
+
+function OkrJobEditModal({ user, onClose, onSave }) {
+  const [jobs, setJobs] = useState(() => {
+    const init = Array.isArray(user.primaryJobs) ? user.primaryJobs.map((j) => ({ ...j })) : []
+    return init.length > 0 ? init : [{ label: '', unit: 'qty', target: 1 }]
+  })
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const update = (i, patch) => setJobs((prev) => prev.map((x, idx) => (idx === i ? { ...x, ...patch } : x)))
+  const add = () => { if (jobs.length < 3) setJobs((p) => [...p, { label: '', unit: 'qty', target: 1 }]) }
+  const remove = (i) => setJobs((p) => {
+    const next = p.filter((_, idx) => idx !== i)
+    return next.length === 0 ? [{ label: '', unit: 'qty', target: 1 }] : next
+  })
+  const save = async () => {
+    const cleaned = jobs.map((j) => ({ label: String(j.label || '').trim(), unit: j.unit === 'nominal' ? 'nominal' : 'qty', target: Math.max(1, Number(j.target) || 1) })).filter((j) => j.label)
+    if (cleaned.length > 3) { setError('Maksimal 3 job.'); return }
+    setSaving(true)
+    const r = await onSave(cleaned)
+    setSaving(false)
+    if (!r.ok) setError(r.error || 'Gagal menyimpan')
+  }
+  return (
+    <Modal open onClose={onClose} title={`Job Utama — ${user.fullName}`}>
+      <div className="space-y-3">
+        <p className="text-xs leading-relaxed text-slate-500">Maksimal 3 job. Label akan muncul sebagai pilihan kategori <b>Utama</b> di Daily Job.</p>
+        {jobs.map((j, i) => (
+          <div key={i} className="rounded-xl border border-slate-200 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-700">Job {i + 1}</span>
+              <button onClick={() => remove(i)} className="text-xs font-bold text-rose-600 hover:underline">Hapus</button>
+            </div>
+            <input value={j.label} onChange={(e) => update(i, { label: e.target.value })} placeholder="Contoh: Follow up klien" className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-500/10" />
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <select value={j.unit} onChange={(e) => update(i, { unit: e.target.value })} className="rounded-lg border border-slate-200 px-2 py-2 text-xs font-bold">
+                <option value="qty">Qty (jumlah)</option>
+                <option value="nominal">Nominal (Rp)</option>
+              </select>
+              <input type="number" min={1} value={j.target} onChange={(e) => update(i, { target: e.target.value })} className="rounded-lg border border-slate-200 px-2 py-2 text-xs" placeholder="Target" />
+            </div>
+          </div>
+        ))}
+        {jobs.length < 3 && <button onClick={add} className="w-full rounded-xl border border-dashed border-violet-300 bg-violet-50 py-2 text-sm font-bold text-violet-700 hover:bg-violet-100">+ Tambah Job</button>}
+        {error && <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">{error}</p>}
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-700">Batal</button>
+          <button onClick={save} disabled={saving} className="flex-1 rounded-xl bg-violet-600 py-2.5 text-sm font-bold text-white hover:bg-violet-700 disabled:opacity-50">{saving ? 'Menyimpan…' : 'Simpan'}</button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function OkrInlineEditor({ user, onClose, onSave }) {
+  const [jobs, setJobs] = useState(() => {
+    const init = Array.isArray(user.primaryJobs) ? user.primaryJobs.map((j) => ({ ...j })) : []
+    return init.length > 0 ? init : [{ label: '', unit: 'qty', target: 1 }]
+  })
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const update = (i, patch) => setJobs((prev) => prev.map((x, idx) => (idx === i ? { ...x, ...patch } : x)))
+  const add = () => { if (jobs.length < 3) setJobs((p) => [...p, { label: '', unit: 'qty', target: 1 }]) }
+  const remove = (i) => setJobs((p) => {
+    const next = p.filter((_, idx) => idx !== i)
+    return next.length === 0 ? [{ label: '', unit: 'qty', target: 1 }] : next
+  })
+  const save = async () => {
+    const cleaned = jobs.map((j) => ({ label: String(j.label || '').trim(), unit: j.unit === 'nominal' ? 'nominal' : 'qty', target: Math.max(1, Number(j.target) || 1) })).filter((j) => j.label)
+    if (cleaned.length > 3) { setError('Maksimal 3 job.'); return }
+    setSaving(true)
+    const r = await onSave(cleaned)
+    setSaving(false)
+    if (!r.ok) setError(r.error || 'Gagal menyimpan')
+  }
+  return (
+    <div className="space-y-3">
+      <p className="text-xs leading-relaxed text-slate-500">Maksimal 3 job. Kosongkan label untuk hapus. <b>Utama</b> muncul di Daily Job.</p>
+      {jobs.map((j, i) => (
+        <div key={i} className="rounded-xl border border-slate-200 bg-white p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-700">Job {i + 1}</span>
+            <button onClick={() => remove(i)} className="text-xs font-bold text-rose-600 hover:underline">Hapus</button>
+          </div>
+          <input value={j.label} onChange={(e) => update(i, { label: e.target.value })} placeholder="Contoh: Follow up klien" className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-500/10" />
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <select value={j.unit} onChange={(e) => update(i, { unit: e.target.value })} className="rounded-lg border border-slate-200 px-2 py-2 text-xs font-bold">
+              <option value="qty">Qty (jumlah)</option>
+              <option value="nominal">Nominal (Rp)</option>
+            </select>
+            <input type="number" min={1} value={j.target} onChange={(e) => update(i, { target: e.target.value })} className="rounded-lg border border-slate-200 px-2 py-2 text-xs" placeholder="Target" />
+          </div>
+        </div>
+      ))}
+      {jobs.length < 3 && <button onClick={add} className="w-full rounded-xl border border-dashed border-violet-300 bg-white py-2 text-sm font-bold text-violet-700 hover:bg-violet-50">+ Tambah Job</button>}
+      {error && <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">{error}</p>}
+      <div className="flex gap-2">
+        <button onClick={onClose} className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-700">Batal</button>
+        <button onClick={save} disabled={saving} className="flex-1 rounded-xl bg-violet-600 py-2.5 text-sm font-bold text-white hover:bg-violet-700 disabled:opacity-50">{saving ? 'Menyimpan…' : 'Simpan'}</button>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// REPORT OKR — laporan informatif & mudah dipahami
+// ============================================================
+function OkrReportTab() {
+  const { users } = useUsers()
+  const [range, setRange] = useState(() => {
+    const to = new Date().toISOString().slice(0, 10)
+    const from = new Date(Date.now() - 29 * 24 * 3600 * 1000).toISOString().slice(0, 10)
+    return { from, to }
+  })
+  const [team, setTeam] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [q, setQ] = useState('')
+  const [mode, setMode] = useState('harian') // harian | mingguan | bulanan
+  const [reportPage, setReportPage] = useState(1)
+  const REPORT_PAGE_SIZE = 20
+
+  // Hitung hari kerja Senin-Jumat di rentang (untuk target mingguan/bulanan)
+  const countWorkdays = (fromStr, toStr) => {
+    const s = new Date(fromStr + 'T00:00:00')
+    const e = new Date(toStr + 'T00:00:00')
+    let c = 0
+    for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+      const day = d.getDay()
+      if (day !== 0 && day !== 6) c++
+    }
+    return Math.max(1, c)
+  }
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const res = await api(`/okr/team?from=${range.from}&to=${range.to}`)
+      setTeam(res.inputs || [])
+    } catch { setTeam([]) }
+    setLoading(false)
+  }
+  useEffect(() => { load() }, [range.from, range.to])
+
+  const filtered = useMemo(() => {
+    if (!q.trim()) return team
+    const s = q.trim().toLowerCase()
+    return team.filter((x) => [x.fullName, x.username, x.title, x.jobLabel].some((v) => String(v || '').toLowerCase().includes(s)))
+  }, [team, q])
+
+  // Hitung pencapaian target harian/mingguan/bulanan per orang per job
+  const pencapaian = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10)
+    const weekStart = new Date(Date.now() - 6 * 24 * 3600 * 1000).toISOString().slice(0, 10)
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
+    const byUserJob = {}
+    users.forEach((u) => {
+      const jobs = Array.isArray(u.primaryJobs) ? u.primaryJobs : []
+      jobs.forEach((j) => {
+        const key = `${u.id}::${j.label}`
+        byUserJob[key] = { user: u, job: j, harian: 0, mingguan: 0, bulanan: 0 }
+      })
+    })
+    filtered.forEach((x) => {
+      if (x.category !== 'utama' || !x.jobLabel) return
+      const key = `${x.userId}::${x.jobLabel}`
+      if (!byUserJob[key]) return
+      const d = (x.workDate || '').slice(0, 10)
+      if (d === today) byUserJob[key].harian += 1
+      if (d >= weekStart) byUserJob[key].mingguan += 1
+      if (d >= monthStart) byUserJob[key].bulanan += 1
+    })
+    return Object.values(byUserJob)
+  }, [users, filtered])
+
+  const stats = useMemo(() => {
+    const total = filtered.length
+    const userSet = new Set(filtered.map((x) => x.userId))
+    const usersCount = userSet.size
+    const avg = usersCount ? (total / usersCount).toFixed(1) : '0'
+    const utama = filtered.filter((x) => x.category === 'utama').length
+    const lainnya = total - utama
+    const byDate = {}
+    filtered.forEach((x) => { const d = (x.workDate || '').slice(0, 10); byDate[d] = (byDate[d] || 0) + 1 })
+    const dates = Object.entries(byDate).sort((a, b) => a[0].localeCompare(b[0])).slice(-14)
+    // Capaian target
+    const totalTargetHarian = users.reduce((s, u) => s + (Array.isArray(u.primaryJobs) ? u.primaryJobs.reduce((a, j) => a + (Number(j.target) || 0), 0) : 0), 0)
+    const todayCount = filtered.filter((x) => (x.workDate || '').slice(0, 10) === new Date().toISOString().slice(0, 10) && x.category === 'utama').length
+    const persenHarian = totalTargetHarian ? Math.min(100, Math.round((todayCount / totalTargetHarian) * 100)) : 0
+    return { total, users: usersCount, avg, utama, lainnya, dates, totalTargetHarian, todayCount, persenHarian }
+  }, [filtered, users])
+
+  const perUser = useMemo(() => {
+    const m = {}
+    filtered.forEach((x) => { const k = x.fullName || x.username || x.userId; m[k] = (m[k] || 0) + 1 })
+    return Object.entries(m).map(([name, v]) => ({ name: String(name).slice(0, 12), count: v })).sort((a, b) => b.count - a.count).slice(0, 8)
+  }, [filtered])
+
+  const pie = [
+    { name: 'Utama', value: stats.utama, fill: '#7c3aed' },
+    { name: 'Lainnya', value: stats.lainnya, fill: '#94a3b8' },
+  ]
+
+  const modeLabel = { harian: 'Hari Ini', mingguan: '7 Hari Terakhir', bulanan: 'Bulan Ini' }[mode]
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-4">
+        <h3 className="text-sm font-bold text-slate-900">Laporan OKR — Lengkap Harian / Mingguan / Bulanan</h3>
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">Admin bisa lihat <b>apakah target tercapai</b> — bukan cuma jumlah input. Pilih rentang, lalu lihat capaian per orang per job. Mudah dibaca di HP.</p>
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+          <input type="date" value={range.from} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} className="rounded-xl border border-slate-200 px-3 py-2 text-xs" />
+          <input type="date" value={range.to} onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} className="rounded-xl border border-slate-200 px-3 py-2 text-xs" />
+          <button onClick={() => { const to = new Date().toISOString().slice(0, 10); const from = new Date(Date.now() - 6 * 24 * 3600 * 1000).toISOString().slice(0, 10); setRange({ from, to }) }} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold">7 hari</button>
+          <button onClick={() => { const to = new Date().toISOString().slice(0, 10); const from = new Date(Date.now() - 29 * 24 * 3600 * 1000).toISOString().slice(0, 10); setRange({ from, to }) }} className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-bold text-white">30 hari</button>
+        </div>
+        <div className="relative mt-3">
+          <svg xmlns="http://www.w3.org/2000/svg" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari orang / job / judul..." className="w-full rounded-xl border border-slate-200 py-2 pl-10 pr-3 text-sm focus:border-violet-400 focus:outline-none focus:ring-4 focus:ring-violet-500/10" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="card p-3 text-center"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total Input</p><p className="mt-1 text-2xl font-extrabold text-slate-900">{stats.total}</p><p className="text-[10px] text-slate-400">{range.from} → {range.to}</p></div>
+        <div className="card p-3 text-center"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Orang Aktif</p><p className="mt-1 text-2xl font-extrabold text-indigo-600">{stats.users}</p><p className="text-[10px] text-slate-400">dari {users.length} karyawan</p></div>
+        <div className="card p-3 text-center"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Rata2 / Orang</p><p className="mt-1 text-2xl font-extrabold text-slate-900">{stats.avg}</p><p className="text-[10px] text-slate-400">input</p></div>
+        <div className="card p-3 text-center border-violet-200 bg-violet-50"><p className="text-[10px] font-bold uppercase tracking-wider text-violet-700">Capaian Hari Ini</p><p className="mt-1 text-2xl font-extrabold text-violet-700">{stats.persenHarian}%</p><p className="text-[10px] text-violet-600">{stats.todayCount}/{stats.totalTargetHarian} target</p></div>
+      </div>
+
+      {/* Pencapaian target per orang per job — inti "bener ga target" */}
+      <div className="card p-4">
+        <div className="flex items-center justify-between">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Pencapaian Target — {modeLabel}</h4>
+          <div className="flex gap-1 rounded-full bg-slate-100 p-1">
+            {['harian', 'mingguan', 'bulanan'].map((m) => (
+              <button key={m} onClick={() => setMode(m)} className={`rounded-full px-2.5 py-1 text-[11px] font-bold capitalize ${mode === m ? 'bg-violet-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}>{m}</button>
+            ))}
+          </div>
+        </div>
+        <p className="mt-1 text-xs text-slate-500">Contoh: <b>Finance — Membuat Invoice</b> target 12/hari → kalau hari ini baru 8, bar jadi kuning. Admin langsung tau siapa kurang.</p>
+        <div className="mt-3 space-y-2 max-h-[380px] overflow-auto pr-1">
+          {pencapaian.length === 0 ? (
+            <p className="py-6 text-center text-sm text-slate-500">Belum ada job utama yang di-set di OKR Master.</p>
+          ) : (
+            pencapaian.map((row) => {
+              const actual = row[mode]
+              const target = Number(row.job.target) || 1
+              const need = mode === 'harian' ? target : mode === 'mingguan' ? target * 5 : target * countWorkdays(range.from, range.to)
+              const pct = Math.min(100, Math.round((actual / need) * 100))
+              const color = pct >= 100 ? 'bg-emerald-500' : pct >= 70 ? 'bg-amber-500' : 'bg-rose-500'
+              const textColor = pct >= 100 ? 'text-emerald-700' : pct >= 70 ? 'text-amber-700' : 'text-rose-700'
+              return (
+                <div key={`${row.user.id}-${row.job.label}`} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3">
+                  <img src={row.user.photo || `https://ui-avatars.com/api/?name=${encodeURIComponent(row.user.fullName)}&background=random`} alt="" className="h-8 w-8 rounded-full object-cover" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-bold text-slate-900">{row.user.fullName} <span className="font-normal text-slate-500">· {row.job.label}</span></p>
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100"><div className={`h-full ${color} transition-all`} style={{ width: `${pct}%` }} /></div>
+                      <span className={`shrink-0 rounded-full bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] font-bold ${textColor}`}>{actual}/{need} · {pct}%</span>
+                    </div>
+                    <p className="mt-1 font-mono text-[10px] text-slate-400">{modeLabel} · target {row.job.target} {row.job.unit}</p>
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="card p-6 text-center text-sm text-slate-500">Memuat laporan…</div>
+      ) : filtered.length === 0 ? (
+        <div className="card p-8 text-center"><p className="text-sm font-bold text-slate-700">Belum ada data</p><p className="mt-1 text-xs text-slate-500">Tidak ada input OKR pada rentang {range.from} → {range.to}.</p></div>
+      ) : (
+        <>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="card p-4">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Top Kontributor</h4>
+              <div className="mt-3 h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={perUser} layout="vertical" margin={{ left: 8, right: 12 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                    <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={80} />
+                    <Tooltip />
+                    <Bar dataKey="count" fill="#7c3aed" radius={[0, 8, 8, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <p className="mt-2 text-center text-[11px] text-slate-400">Siapa paling rajin input</p>
+            </div>
+
+            <div className="card p-4">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Komposisi Kategori</h4>
+              <div className="mt-2 h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={pie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={78} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                      {pie.map((e, i) => <Cell key={i} fill={e.fill} />)}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <p className="mt-1 text-center text-[11px] text-slate-400">Utama = sesuai job utama yang kamu set di tab OKR Master</p>
+            </div>
+          </div>
+
+          <div className="card p-4">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Tren Harian (14 hari terakhir)</h4>
+            <div className="mt-3 h-48">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={stats.dates.map(([d, v]) => ({ date: d.slice(5), count: v }))} margin={{ left: 8, right: 12 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="card p-0 overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Detail Input Terbaru</h4>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-bold text-slate-600">{filtered.length} baris</span>
+                <button onClick={() => exportOkrToExcel({ inputs: filtered, from: range.from, to: range.to })} className="rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700">Export Excel</button>
+              </div>
+            </div>
+            <div className="max-h-[420px] overflow-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="sticky top-0 bg-slate-50">
+                  <tr className="border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    <th className="px-3 py-2">Tanggal</th>
+                    <th className="px-3 py-2">Orang</th>
+                    <th className="px-3 py-2">Job</th>
+                    <th className="px-3 py-2">Judul</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.slice((reportPage - 1) * REPORT_PAGE_SIZE, reportPage * REPORT_PAGE_SIZE).map((r) => (
+                    <tr key={r.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
+                      <td className="whitespace-nowrap px-3 py-2 font-mono text-slate-600">{(r.workDate || '').slice(0, 10)}</td>
+                      <td className="px-3 py-2 font-semibold text-slate-900">{r.fullName || r.username}</td>
+                      <td className="px-3 py-2"><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${r.category === 'utama' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'}`}>{r.category === 'utama' ? r.jobLabel || 'Utama' : 'Lainnya'}</span></td>
+                      <td className="max-w-[220px] truncate px-3 py-2 text-slate-700" title={r.title}>{r.title}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="border-t border-slate-100 p-2">
+              <Pagination page={reportPage} totalPages={Math.max(1, Math.ceil(filtered.length / REPORT_PAGE_SIZE))} onPageChange={setReportPage} />
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// Keep alias for old id
+function DailyJobTab() {
+  return <OkrMasterTab />
+}
+
+// ============================================================
+// SETTINGS TAB — pengaturan ambang kategori PO (Event Kecil/Menengah/Besar)
+// ============================================================
+function SettingsTab() {
+  const { poThresholds, setPOThresholds } = useEvents()
+  const toast = useToast()
+  const [kecilMax, setKecilMax] = useState(String(poThresholds?.kecilMax ?? 50000000))
+  const [menengahMax, setMenengahMax] = useState(String(poThresholds?.menengahMax ?? 200000000))
+  const [saving, setSaving] = useState(false)
+
+  const formatRupiah = (value) => {
+    const n = Number(String(value).replace(/[^0-9]/g, ''))
+    if (!Number.isFinite(n)) return 'Rp 0'
+    return 'Rp ' + n.toLocaleString('id-ID')
+  }
+
+  const handleSave = async () => {
+    const kecil = Number(String(kecilMax).replace(/[^0-9]/g, '')) || 0
+    const menengah = Number(String(menengahMax).replace(/[^0-9]/g, '')) || 0
+    if (kecil <= 0 || menengah <= kecil) {
+      toast.error('Nilai tidak valid. Pastikan batas Event Kecil < Event Menengah.')
+      return
+    }
+    setSaving(true)
+    const result = await setPOThresholds({ kecilMax: kecil, menengahMax: menengah })
+    setSaving(false)
+    if (result.ok) {
+      toast.success('Ambang kategori PO berhasil disimpan.')
+    } else {
+      toast.error(result.error || 'Gagal menyimpan ambang kategori PO.')
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="card p-4">
+        <div className="mb-3 flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </span>
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">Ambang Kategori PO</h3>
+            <p className="text-[11px] text-slate-500">
+              Batas nilai PO untuk menentukan Event Kecil, Menengah, dan Besar.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+              Batas Event Kecil
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={formatRupiah(kecilMax)}
+              onChange={(e) => setKecilMax(e.target.value)}
+              className="block w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 font-mono text-sm transition focus:border-indigo-400 focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
+              placeholder="Rp 0"
+            />
+            <p className="mt-1 text-[11px] text-slate-400">
+              Nilai PO ≤ batas ini masuk kategori <span className="font-bold text-emerald-600">Event Kecil</span>.
+            </p>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+              Batas Event Menengah
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={formatRupiah(menengahMax)}
+              onChange={(e) => setMenengahMax(e.target.value)}
+              className="block w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 font-mono text-sm transition focus:border-indigo-400 focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
+              placeholder="Rp 0"
+            />
+            <p className="mt-1 text-[11px] text-slate-400">
+              Nilai PO di atas batas kecil sampai batas ini masuk{' '}
+              <span className="font-bold text-amber-600">Event Menengah</span>. Di atas batas ini masuk{' '}
+              <span className="font-bold text-rose-600">Event Besar</span>.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700">
+              Kecil ≤ {formatRupiah(kecilMax)}
+            </span>
+            <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-700">
+              Menengah ≤ {formatRupiah(menengahMax)}
+            </span>
+            <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[10px] font-bold text-rose-700">
+              Besar &gt; {formatRupiah(menengahMax)}
+            </span>
+          </div>
+
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="w-full rounded-xl bg-indigo-600 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 active:scale-[0.98] disabled:opacity-60"
+          >
+            {saving ? 'Menyimpan...' : 'Simpan Pengaturan'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// AUDIT LOG TAB (riwayat aksi admin)
+// ============================================================
+const AUDIT_ACTION_LABEL = {
+  'users.create': { label: 'Tambah karyawan', color: 'bg-emerald-100 text-emerald-700' },
+  'users.update': { label: 'Edit karyawan', color: 'bg-sky-100 text-sky-700' },
+  'users.role': { label: 'Ubah role', color: 'bg-violet-100 text-violet-700' },
+  'leave.balance_set': { label: 'Set saldo cuti', color: 'bg-amber-100 text-amber-700' },
+  'superadmin.reset_password': { label: 'Reset password', color: 'bg-slate-200 text-slate-700' },
+  'superadmin.leave_balance': { label: 'Set saldo cuti', color: 'bg-amber-100 text-amber-700' },
+  'superadmin.user_delete': { label: 'Hapus user', color: 'bg-rose-100 text-rose-700' },
+  'leave.adjust': { label: 'Penyesuaian cuti', color: 'bg-amber-100 text-amber-700' },
+  'clock.pending_approve': { label: 'Setujui absen manual', color: 'bg-emerald-100 text-emerald-700' },
+  'clock.pending_reject': { label: 'Tolak absen manual', color: 'bg-rose-100 text-rose-700' },
+  'pengajuan.review': { label: 'Review pengajuan', color: 'bg-indigo-100 text-indigo-700' },
+  'pengajuan.delete': { label: 'Hapus pengajuan', color: 'bg-rose-100 text-rose-700' },
+  'announcements.create': { label: 'Buat pengumuman', color: 'bg-emerald-100 text-emerald-700' },
+  'announcements.update': { label: 'Edit pengumuman', color: 'bg-sky-100 text-sky-700' },
+  'announcements.delete': { label: 'Hapus pengumuman', color: 'bg-rose-100 text-rose-700' },
+  'events.create': { label: 'Buat event', color: 'bg-emerald-100 text-emerald-700' },
+  'events.update': { label: 'Edit event', color: 'bg-sky-100 text-sky-700' },
+  'events.delete': { label: 'Hapus event', color: 'bg-rose-100 text-rose-700' },
+  'events.thresholds': { label: 'Ubah threshold PO', color: 'bg-slate-200 text-slate-700' },
+  'locations.create': { label: 'Tambah lokasi', color: 'bg-emerald-100 text-emerald-700' },
+  'locations.update': { label: 'Edit lokasi', color: 'bg-sky-100 text-sky-700' },
+  'locations.delete': { label: 'Hapus lokasi', color: 'bg-rose-100 text-rose-700' },
+  'holidays.create': { label: 'Tambah libur', color: 'bg-emerald-100 text-emerald-700' },
+  'holidays.update': { label: 'Edit libur', color: 'bg-sky-100 text-sky-700' },
+  'holidays.delete': { label: 'Hapus libur', color: 'bg-rose-100 text-rose-700' },
+}
+
+function formatAuditTime(iso) {
+  if (!iso) return '-'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleString('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function AuditTab() {
+  const toast = useToast()
+  const [logs, setLogs] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const load = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const data = await api('/audit', { query: { limit: 100 } })
+      setLogs(data?.logs || [])
+    } catch (err) {
+      setError(err?.message || 'Gagal memuat riwayat aktivitas')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          Riwayat aksi admin (100 terbaru)
+        </p>
+        <button
+          type="button"
+          onClick={load}
+          className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-600 transition hover:bg-slate-50 active:scale-95"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          Muat ulang
+        </button>
+      </div>
+
+      {loading && (
+        <div className="card p-6 text-center text-sm text-slate-500 animate-pulse">Memuat riwayat aktivitas...</div>
+      )}
+
+      {!loading && error && (
+        <div className="card border-rose-200 bg-rose-50/60 p-4 text-sm font-semibold text-rose-700">{error}</div>
+      )}
+
+      {!loading && !error && logs.length === 0 && (
+        <div className="card p-6 text-center text-sm text-slate-500">
+          Belum ada aktivitas tercatat. Aksi admin (tambah/edit karyawan, review pengajuan, dsb.) akan muncul di sini.
+        </div>
+      )}
+
+      {!loading && !error && logs.length > 0 && (
+        <div className="space-y-2">
+          {logs.map((log) => {
+            const meta = AUDIT_ACTION_LABEL[log.action] || { label: log.action, color: 'bg-slate-200 text-slate-700' }
+            const targetLabel =
+              log.targetType === 'user' && log.detail?.username
+                ? `@${log.detail.username}`
+                : log.targetId
+                ? String(log.targetId).slice(0, 12)
+                : ''
+            return (
+              <div key={log.id} className="card flex items-start gap-3 p-3">
+                <span className={`mt-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${meta.color}`}>
+                  {meta.label}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-800">
+                    {log.actorName ? `@${log.actorName}` : 'Admin'}
+                    {targetLabel && (
+                      <span className="font-normal text-slate-500"> → {targetLabel}</span>
+                    )}
+                  </p>
+                  <p className="mt-0.5 font-mono text-[10px] text-slate-400">{formatAuditTime(log.createdAt)}</p>
+                  {log.detail && Object.keys(log.detail).length > 0 && (
+                    <p className="mt-1 truncate font-mono text-[10px] text-slate-400">{JSON.stringify(log.detail)}</p>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -2578,8 +3509,412 @@ function OkrTab() {
 // ============================================================
 // MAIN PAGE
 // ============================================================
+// ============================================================
+// SUPERADMIN TAB — cheat panel (kekuatan penuh)
+// ============================================================
+function SuperadminTab() {
+  const { users, refreshUsers } = useUsers()
+  const { currentUser } = useAuth()
+  const { refreshLeave, getLeaveBalance } = useLeave()
+  const toast = useToast()
+
+  const [resetUsername, setResetUsername] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [resetting, setResetting] = useState(false)
+
+  const [quotaUserId, setQuotaUserId] = useState('')
+  const [quotaYear, setQuotaYear] = useState(String(new Date().getFullYear()))
+  const [quotaTotal, setQuotaTotal] = useState('12')
+  const [quotaUsed, setQuotaUsed] = useState('0')
+  const [savingQuota, setSavingQuota] = useState(false)
+
+  const [deleteUsername, setDeleteUsername] = useState('')
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const sortedUsers = useMemo(
+    () => [...users].sort((a, b) => String(a.username).localeCompare(String(b.username))),
+    [users]
+  )
+
+  const handleResetPassword = async () => {
+    if (!resetUsername) {
+      toast.error('Pilih user dulu.')
+      return
+    }
+    if (newPassword.length < 6) {
+      toast.error('Password baru minimal 6 karakter.')
+      return
+    }
+    setResetting(true)
+    try {
+      await api('/superadmin/reset-password', {
+        method: 'POST',
+        body: { username: resetUsername, newPassword },
+      })
+      toast.success(`Password @${resetUsername} berhasil di-reset.`)
+      setNewPassword('')
+    } catch (err) {
+      toast.error(err.message || 'Gagal reset password.')
+    } finally {
+      setResetting(false)
+    }
+  }
+
+  const handleSetQuota = async () => {
+    if (!quotaUserId) {
+      toast.error('Pilih user dulu.')
+      return
+    }
+    const total = Number(quotaTotal)
+    const used = Number(quotaUsed)
+    if (!Number.isFinite(total) || total < 0 || !Number.isFinite(used) || used < 0) {
+      toast.error('Kuota dan terpakai harus angka positif.')
+      return
+    }
+    setSavingQuota(true)
+    try {
+      await api('/superadmin/leave-balance', {
+        method: 'PUT',
+        body: { userId: quotaUserId, year: Number(quotaYear), totalQuota: total, used },
+      })
+      await refreshLeave()
+      toast.success('Saldo cuti berhasil diubah.')
+    } catch (err) {
+      toast.error(err.message || 'Gagal mengubah saldo cuti.')
+    } finally {
+      setSavingQuota(false)
+    }
+  }
+
+  const handleDeleteUser = async () => {
+    if (!deleteUsername) {
+      toast.error('Pilih user dulu.')
+      return
+    }
+    setDeleting(true)
+    try {
+      await api(`/superadmin/users/${encodeURIComponent(deleteUsername)}`, { method: 'DELETE' })
+      await refreshUsers()
+      toast.success(`User @${deleteUsername} berhasil dihapus.`)
+      setDeleteUsername('')
+      setDeleteConfirm(false)
+    } catch (err) {
+      toast.error(err.message || 'Gagal menghapus user.')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const inputCls =
+    'block w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm transition focus:border-rose-400 focus:outline-none focus:ring-4 focus:ring-rose-500/10'
+  const selectCls =
+    'block w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm transition focus:border-rose-400 focus:outline-none focus:ring-4 focus:ring-rose-500/10'
+
+  const quotaUser = users.find((u) => u.id === quotaUserId)
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-800">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+        </svg>
+        <span>
+          <span className="font-bold">Mode Superadmin</span> — stealth aktif: aksi Anda tidak tercatat di log aktivitas, admin lain tidak akan melihatnya.
+        </span>
+      </div>
+
+      {/* Reset password */}
+      <div className="card space-y-3 p-4">
+        <h3 className="text-sm font-bold text-slate-900">Reset Password User</h3>
+        <p className="text-[11px] text-slate-500">Ganti password user mana pun tanpa verifikasi KTP.</p>
+        <div className="space-y-2">
+          <select value={resetUsername} onChange={(e) => setResetUsername(e.target.value)} className={selectCls}>
+            <option value="">Pilih user…</option>
+            {sortedUsers.map((u) => (
+              <option key={u.id} value={u.username}>
+                {u.fullName} (@{u.username})
+              </option>
+            ))}
+          </select>
+          <input
+            type="text"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="Password baru (min. 6 karakter)"
+            className={inputCls}
+          />
+        </div>
+        <button
+          onClick={handleResetPassword}
+          disabled={resetting}
+          className="w-full rounded-xl bg-rose-600 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-rose-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {resetting ? 'Menyimpan…' : 'Reset Password'}
+        </button>
+      </div>
+
+      {/* Saldo cuti */}
+      <div className="card space-y-3 p-4">
+        <h3 className="text-sm font-bold text-slate-900">Ubah Saldo Cuti</h3>
+        <p className="text-[11px] text-slate-500">Set kuota dan jumlah terpakai langsung, tahun berjalan.</p>
+        <div className="grid grid-cols-2 gap-2">
+          <select value={quotaUserId} onChange={(e) => setQuotaUserId(e.target.value)} className={selectCls}>
+            <option value="">Pilih user…</option>
+            {sortedUsers.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.fullName} (@{u.username})
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            value={quotaYear}
+            onChange={(e) => setQuotaYear(e.target.value)}
+            className={inputCls}
+            aria-label="Tahun"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-400">Kuota Total</label>
+            <input
+              type="number"
+              min={0}
+              value={quotaTotal}
+              onChange={(e) => setQuotaTotal(e.target.value)}
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-400">Terpakai</label>
+            <input
+              type="number"
+              min={0}
+              value={quotaUsed}
+              onChange={(e) => setQuotaUsed(e.target.value)}
+              className={inputCls}
+            />
+          </div>
+        </div>
+        {quotaUser && (
+          <p className="font-mono text-[10px] text-slate-400">
+            Saat ini: {getLeaveBalance(quotaUser.id, Number(quotaYear) || new Date().getFullYear()).totalQuota} kuota ·{' '}
+            {getLeaveBalance(quotaUser.id, Number(quotaYear) || new Date().getFullYear()).used} terpakai
+          </p>
+        )}
+        <button
+          onClick={handleSetQuota}
+          disabled={savingQuota}
+          className="w-full rounded-xl bg-rose-600 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-rose-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {savingQuota ? 'Menyimpan…' : 'Simpan Saldo Cuti'}
+        </button>
+      </div>
+
+      {/* Hapus user */}
+      <div className="card space-y-3 p-4">
+        <h3 className="text-sm font-bold text-rose-700">Hapus User</h3>
+        <p className="text-[11px] text-slate-500">
+          Hapus user mana pun (kecuali diri sendiri &amp; superadmin terakhir). Tindakan ini tidak bisa dibatalkan.
+        </p>
+        {!deleteConfirm ? (
+          <div className="space-y-2">
+            <select value={deleteUsername} onChange={(e) => setDeleteUsername(e.target.value)} className={selectCls}>
+              <option value="">Pilih user…</option>
+              {sortedUsers
+                .filter((u) => u.id !== currentUser?.id)
+                .map((u) => (
+                  <option key={u.id} value={u.username}>
+                    {u.fullName} (@{u.username})
+                  </option>
+                ))}
+            </select>
+            <button
+              onClick={() => {
+                if (!deleteUsername) {
+                  toast.error('Pilih user dulu.')
+                  return
+                }
+                setDeleteConfirm(true)
+              }}
+              className="w-full rounded-xl border border-rose-200 bg-rose-50 py-2.5 text-sm font-bold text-rose-700 transition hover:bg-rose-100 active:scale-[0.98]"
+            >
+              Hapus User
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+              Yakin hapus <span className="font-bold">@{deleteUsername}</span>? Semua data (absensi, pengajuan, saldo, event) ikut terhapus.
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setDeleteConfirm(false)}
+                className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50 active:scale-[0.98]"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleDeleteUser}
+                disabled={deleting}
+                className="flex-1 rounded-xl bg-rose-600 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-rose-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {deleting ? 'Menghapus…' : 'Ya, Hapus'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AdminMenuSheet({ open, activeTab, isSuperadmin, viewMode, onSelect, onViewMode, onClose }) {
+  const groups = TAB_GROUPS.map((g) => {
+    const tabs = g.id === 'sistem' && isSuperadmin
+      ? [...g.tabs, { id: 'superadmin', label: 'Superadmin' }]
+      : g.tabs
+    return { ...g, tabs }
+  })
+
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center">
+      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm animate-fade-in" onClick={onClose} aria-hidden="true" />
+      <div className="relative w-full max-w-mobile animate-slide-up rounded-t-3xl bg-white p-4 pb-6 shadow-2xl ring-1 ring-slate-200">
+        <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-slate-200" />
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h2 className="font-display text-base font-bold text-slate-900">Menu Admin</h2>
+            <p className="font-mono text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Prasasti Connect</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Tutup menu"
+            className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 active:scale-95"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+          {groups.map((g) => (
+            <div key={g.id}>
+              <p className="mb-1.5 px-1 font-mono text-[9px] font-bold uppercase tracking-wider text-slate-400">{g.label}</p>
+              <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white">
+                {g.tabs.map((t, i) => {
+                  const active = activeTab === t.id
+                  const isSuperadminTab = t.id === 'superadmin'
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => { onSelect(t.id); onClose() }}
+                      className={`flex w-full items-center gap-3 px-3.5 py-3 text-left transition active:bg-slate-50 ${i > 0 ? 'border-t border-slate-100' : ''} ${active ? 'bg-indigo-50/70' : ''}`}
+                    >
+                      <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${
+                        active
+                          ? isSuperadminTab ? 'bg-rose-600 text-white' : 'bg-indigo-600 text-white'
+                          : isSuperadminTab ? 'bg-rose-50 text-rose-600' : 'bg-slate-100 text-slate-500'
+                      }`}>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          {TAB_ICONS[t.id]}
+                        </svg>
+                      </span>
+                      <span className={`flex-1 text-sm font-bold ${active ? 'text-indigo-700' : 'text-slate-700'}`}>{t.label}</span>
+                      {active && (
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-white">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3">
+          <p className="mb-1.5 px-1 font-mono text-[9px] font-bold uppercase tracking-wider text-slate-400">Tampilan</p>
+          <div className="flex rounded-xl border border-slate-200 bg-white p-0.5">
+            <button
+              type="button"
+              onClick={() => onViewMode('mobile')}
+              className={`flex-1 rounded-lg px-3 py-1.5 text-[11px] font-bold transition ${viewMode === 'mobile' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              📱 Mobile
+            </button>
+            <button
+              type="button"
+              onClick={() => onViewMode('desktop')}
+              className={`flex-1 rounded-lg px-3 py-1.5 text-[11px] font-bold transition ${viewMode === 'desktop' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              🖥 Desktop
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AdminBottomNav({ activeTab, onSelect, onOpenMenu }) {
+  const utama = TAB_GROUPS.find((g) => g.id === 'utama')?.tabs || []
+  return (
+    <div className="fixed inset-x-0 bottom-0 z-30 flex justify-center pointer-events-none">
+      <div className="pointer-events-auto flex w-full max-w-mobile items-center justify-around gap-1 border-t border-slate-200 bg-white/95 px-1 py-1.5 pb-[calc(0.375rem+env(safe-area-inset-bottom))] backdrop-blur-md">
+        {utama.map((t) => {
+          const active = activeTab === t.id
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => onSelect(t.id)}
+              className={`flex flex-1 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 text-[10px] font-bold transition ${active ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500 hover:bg-slate-50'}`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={active ? 2.5 : 2}>
+                {TAB_ICONS[t.id]}
+              </svg>
+              <span className="leading-none">{t.label}</span>
+            </button>
+          )
+        })}
+        <button
+          type="button"
+          onClick={onOpenMenu}
+          className="flex flex-1 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 text-[10px] font-bold text-slate-500 transition hover:bg-slate-50"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+          <span className="leading-none">Lainnya</span>
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function AdminPage() {
+  const { isSuperadmin } = useAuth()
+  const location = useLocation()
   const [tab, setTab] = useState('users')
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  // Buka tab sesuai query ?tab= (untuk notifikasi pengajuan -> /admin?tab=pengajuan)
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const qTab = params.get('tab')
+    const validTabs = new Set([...TAB_GROUPS.flatMap((g) => g.tabs.map((t) => t.id)), 'superadmin'])
+    if (qTab && validTabs.has(qTab)) setTab(qTab)
+  }, [location.search])
 
   // View mode toggle: 'mobile' (default, constrained to phone width) atau
   // 'desktop' (full width, lebih lapang). Preferensi disimpan di localStorage.
@@ -2596,6 +3931,15 @@ export default function AdminPage() {
 
   const isMobileView = viewMode === 'mobile'
 
+  const activeTabLabel = useMemo(() => {
+    for (const g of TAB_GROUPS) {
+      const found = g.tabs.find((t) => t.id === tab)
+      if (found) return found.label
+    }
+    if (tab === 'superadmin') return 'Superadmin'
+    return 'Menu'
+  }, [tab])
+
   return (
     <div
       className={[
@@ -2611,7 +3955,7 @@ export default function AdminPage() {
         className={[
           'relative w-full animate-slide-up transition-all',
           isMobileView
-            ? 'max-w-mobile'
+            ? 'max-w-mobile pb-20'
             : 'max-w-7xl rounded-2xl bg-white p-4 shadow-xl ring-1 ring-slate-200 sm:p-6',
         ].join(' ')}
       >
@@ -2633,43 +3977,21 @@ export default function AdminPage() {
                 <span className="italic">Admin</span>{' '}
                 <span className="text-indigo-600">Panel</span>
               </h1>
-              <p className="font-mono text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Prasasti Group HRMS</p>
+              <p className="font-mono text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">{activeTabLabel}</p>
             </div>
           </div>
 
-          {/* View mode toggle — hanya untuk admin panel */}
-          <div className="ml-auto flex items-center rounded-xl border border-slate-200 bg-white p-0.5 shadow-sm">
-            <button
-              type="button"
-              onClick={() => setViewMode('mobile')}
-              aria-pressed={isMobileView}
-              className={[
-                'flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition',
-                isMobileView ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700',
-              ].join(' ')}
-              title="Tampilan mobile (lebar phone)"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-              </svg>
-              Mobile
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('desktop')}
-              aria-pressed={!isMobileView}
-              className={[
-                'flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition',
-                !isMobileView ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700',
-              ].join(' ')}
-              title="Tampilan desktop (lebar penuh)"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
-              Desktop
-            </button>
-          </div>
+          {/* Tombol buka menu */}
+          <button
+            type="button"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Buka menu admin"
+            className="ml-auto flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 active:scale-95"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
         </div>
 
         {/* Indikator mode (hanya muncul di mobile view supaya admin tidak lupa) */}
@@ -2679,7 +4001,7 @@ export default function AdminPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
             </svg>
             <span>
-              Mode <span className="font-bold">Mobile Preview</span> — tampilan dibatasi selebar phone. Toggle ke Desktop di kanan atas untuk lihat versi lebar.
+              Mode <span className="font-bold">Mobile Preview</span> — tampilan dibatasi selebar phone. Buka menu ☰ lalu pilih Desktop untuk versi lebar.
             </span>
           </div>
         )}
@@ -2687,32 +4009,69 @@ export default function AdminPage() {
         {/* Stats cards */}
         <StatsCards />
 
-        {/* Tabs */}
-        <div className="mb-4 flex flex-wrap gap-1 rounded-2xl border border-slate-200/80 bg-white/70 p-1 backdrop-blur-sm">
-          {TABS.map((t) => {
-            const active = tab === t.id
-            return (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className={`min-w-[64px] flex-1 rounded-xl px-2 py-2 text-[11px] font-bold transition ${active ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
-              >
-                {t.label}
-              </button>
-            )
-          })}
+        <div className="mb-3 flex flex-col items-end gap-1">
+          <button
+            onClick={async () => {
+              const now = new Date()
+              const { month: periodMonth, year: periodYear } = getCurrentPeriod(now)
+              const { start, end } = getPeriodRange(periodMonth, periodYear)
+              const pad2 = (n) => String(n).padStart(2, '0')
+              const from = `${start.getFullYear()}-${pad2(start.getMonth() + 1)}-${pad2(start.getDate())}`
+              const to = `${end.getFullYear()}-${pad2(end.getMonth() + 1)}-${pad2(end.getDate())}`
+              let okrInputs = []
+              try {
+                const res = await api(`/okr/team?from=${from}&to=${to}`)
+                okrInputs = res.inputs || []
+              } catch {}
+              try {
+                const [uRes, hRes, pRes, holRes, eRes] = await Promise.all([
+                  api('/users'),
+                  api('/clock/history'),
+                  api('/pengajuan'),
+                  api('/holidays').catch(() => ({ holidays: [] })),
+                  api('/events').catch(() => ({ events: [] })),
+                ])
+                exportGlobalToExcel({ users: uRes.users || [], history: hRes.history || [], pengajuan: pRes.pengajuan || [], okrInputs, month: periodMonth, year: periodYear, holidays: holRes.holidays || [], events: eRes.events || [] })
+              } catch {
+                exportGlobalToExcel({ users: [], history: [], pengajuan: [], okrInputs, month: periodMonth, year: periodYear, holidays: [], events: [] })
+              }
+            }}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-700"
+            title={`Periode ${formatPeriodRange(getCurrentPeriod().month, getCurrentPeriod().year)} — Tutup buku 25`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+            Export Global — {formatPeriodRange(getCurrentPeriod().month, getCurrentPeriod().year)}
+          </button>
+          <span className="font-mono text-[9px] font-bold uppercase tracking-wider text-slate-400">Periode 26–25 • Libur merah • 1 baris/orang</span>
         </div>
 
         {/* Tab content */}
         {tab === 'users' && <UsersTab />}
-        {tab === 'kpi' && <OkrTab />}
+        {tab === 'superadmin' && isSuperadmin && <SuperadminTab />}
+        {tab === 'kpi' && <OkrMasterTab />}
+        {tab === 'laporan-okr' && <OkrReportTab />}
         {tab === 'pengajuan' && <PengajuanTab />}
         {tab === 'absensi' && <AbsensiTab />}
         {tab === 'events' && <EventsTab />}
         {tab === 'pengumuman' && <AnnouncementsTab />}
         {tab === 'libur' && <HolidaysTab />}
         {tab === 'lokasi' && <LocationsTab />}
+        {tab === 'pengaturan' && <SettingsTab />}
+        {tab === 'aktivitas' && <AuditTab />}
+
+        <AdminMenuSheet
+          open={menuOpen}
+          activeTab={tab}
+          isSuperadmin={isSuperadmin}
+          viewMode={viewMode}
+          onSelect={setTab}
+          onViewMode={setViewMode}
+          onClose={() => setMenuOpen(false)}
+        />
       </div>
+      {isMobileView && (
+        <AdminBottomNav activeTab={tab} onSelect={setTab} onOpenMenu={() => setMenuOpen(true)} />
+      )}
     </div>
   )
 }

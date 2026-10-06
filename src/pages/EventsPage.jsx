@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useUsers } from '../context/UsersContext'
 import { useEvents } from '../context/EventsContext'
 import { useHolidays } from '../context/HolidaysContext'
 import Modal from '../components/Modal'
@@ -417,7 +418,8 @@ function CreateEventForm({ onSubmit, onCancel, users }) {
 }
 
 export default function EventsPage() {
-  const { currentUser, users } = useAuth()
+  const { currentUser } = useAuth()
+  const { users } = useUsers()
   const { events, createEvent } = useEvents()
   const { getHoliday } = useHolidays()
   const navigate = useNavigate()
@@ -429,7 +431,7 @@ export default function EventsPage() {
 
   const baseEvents = useMemo(() => {
     return [...events]
-      .filter((e) => e.status === 'approved' || (e.status === 'pending' && e.createdBy === currentUser?.fullName))
+      .filter((e) => e.status === 'approved' || (e.status === 'pending' && (e.createdBy === currentUser?.fullName || e.createdBy === currentUser?.id || e.createdBy === currentUser?.username)))
   }, [events, currentUser])
 
   const upcomingEvents = useMemo(() => {
@@ -465,7 +467,7 @@ export default function EventsPage() {
   }, [activeEvents, search])
 
   const handleCreate = async (payload) => {
-    const status = currentUser?.role === 'admin' ? 'approved' : 'pending'
+    const status = currentUser?.role === 'admin' || currentUser?.role === 'superadmin' ? 'approved' : 'pending'
     const newEvent = await createEvent({ ...payload, createdBy: currentUser?.fullName || 'Anonim', status })
     setOpen(false)
     navigate(`/events/${newEvent.id}`)
