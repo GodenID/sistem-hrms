@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(node --check backend/src/routes/auth.js)",
+      "Shell(node --check backend/src/routes/clock.js)",
+      "Shell(node --check backend/src/routes/events.js)",
+      "Shell(node --check backend/src/routes/locations.js)",
+      "Shell(node --check functions/api/[[path]].js)",
+      "Shell(npm:*)",
+      "Shell(npx wrangler --version)",
+      "Shell(npx wrangler pages project list)",
+      "Shell(npx wrangler pages deploy --help)",
+      "Shell(npx wrangler pages deploy dist --project-name hrms --branch master --commit-dirty=true)",
+      "Shell(npx wrangler pages deploy dist --project-name hrms --commit-dirty=true)",
+      "Shell(npx wrangler pages deployment list --project-name hrms)",
+      "Shell(npx wrangler pages deploy dist --project-name hrms --branch main --commit-dirty=true)",
+      "powershell"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

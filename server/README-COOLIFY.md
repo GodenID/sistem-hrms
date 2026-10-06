@@ -56,10 +56,15 @@ Alternatif tanpa pg_dump: export per-tabel CSV dari Supabase SQL editor lalu
 
 ## Langkah 3 — Deploy API di Coolify
 
+**Opsi A — Docker Compose (disarankan):**
 1. Coolify → New Resource → Application → pilih repo ini.
-2. **Build**: tipe `Dockerfile`, Dockerfile location = `server/Dockerfile`,
-   Build Context = **root repo** (`.`).
-3. **Domain**: pasang domain mis. `https://api-hrms.prasastigroup.id`.
+2. Build Pack: `Docker Compose`, file `docker-compose.yml` (root repo).
+3. **Domain**: pasang domain untuk service `api`, mis. `https://api-hrms.prasastigroup.id`.
+4. Lanjut ke Environment di bawah.
+
+**Opsi B — Dockerfile langsung:**
+Tipe `Dockerfile`, Dockerfile location = `server/Dockerfile`,
+Build Context = **root repo** (`.`). Sisanya sama seperti Opsi A.
 4. **Environment** (isi dari `server/.env.example`):
    - `DATABASE_URL` (connection string Postgres Coolify)
    - `AUTH_SECRET` — **wajib sama** dengan secret Pages lama supaya token

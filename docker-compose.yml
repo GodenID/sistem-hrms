@@ -1,0 +1,24 @@
+# HRMS — deploy Coolify (Build Pack: Docker Compose).
+# Service ini HANYA API. Database Postgres sudah ada sebagai resource
+# terpisah di Coolify (lihat server/README-COOLIFY.md).
+# Env (DATABASE_URL, AUTH_SECRET, dst.) diisi dari UI Coolify →
+# Environment Variables, otomatis tersedia di container.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: hrms-api:latest
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      PORT: 3000
+    networks:
+      - coolify
+
+# Satu network dengan database Postgres Coolify supaya hostname
+# internal (gihzfa1ft0fadhhdh3o8pvdk) bisa di-resolve dari API.
+networks:
+  coolify:
+    external: true

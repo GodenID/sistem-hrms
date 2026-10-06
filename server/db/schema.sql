@@ -218,6 +218,9 @@ CREATE TABLE IF NOT EXISTS okr_inputs (
   work_date    DATE NOT NULL,
   category     TEXT NOT NULL DEFAULT 'lainnya',  -- 'utama' | 'lainnya'
   job_label    TEXT,
+  job_id       TEXT,            -- legacy: relasi ke user_jobs (dipertahankan agar dump lama bisa restore)
+  nominal_idr  BIGINT,          -- legacy: nilai nominal OKR lama
+  customer_kind TEXT,           -- legacy: jenis customer OKR lama
   title        TEXT NOT NULL,
   description  TEXT NOT NULL DEFAULT '',
   timestamp    TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -226,6 +229,9 @@ CREATE TABLE IF NOT EXISTS okr_inputs (
 -- Kolom skema baru (DB lama mungkin belum punya) — idempotent.
 ALTER TABLE okr_inputs ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'lainnya';
 ALTER TABLE okr_inputs ADD COLUMN IF NOT EXISTS job_label TEXT;
+ALTER TABLE okr_inputs ADD COLUMN IF NOT EXISTS job_id TEXT;
+ALTER TABLE okr_inputs ADD COLUMN IF NOT EXISTS nominal_idr BIGINT;
+ALTER TABLE okr_inputs ADD COLUMN IF NOT EXISTS customer_kind TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_okr_inputs_user_date ON okr_inputs (user_id, work_date DESC);
 CREATE INDEX IF NOT EXISTS idx_okr_inputs_date ON okr_inputs (work_date);

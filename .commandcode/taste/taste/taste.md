@@ -1,0 +1,17 @@
+# Taste
+- Communicates in Indonesian (Bahasa Indonesia). Confidence: 0.9
+- Prefers analysis and answers first before any code changes ("jangan diubah dulu, jawab dulu" — don't change anything yet, just answer first). Expects a review/discussion pass before modifications are made to the project. Confidence: 0.9
+- Prefers business rules/parameters (e.g., PO thresholds for event categories) to be configurable via an admin settings panel rather than hardcoded, so values can be changed without code changes. Confidence: 0.65
+- Values business data in Indonesian Rupiah (formatted with `id-ID` locale) throughout the UI. Confidence: 0.6
+- Deploys to Cloudflare Pages via the Wrangler CLI (`npx wrangler pages deploy dist --project-name <name>`), targeting an already-existing Pages project and relying on the `functions/` directory being auto-bundled as Pages Functions. Confidence: 0.8
+- Always deploys to **production**, never preview, on Cloudflare Pages ("jangan preview tapi production selalu production"). For the `hrms` project this means deploying to the production branch `main` explicitly (`--branch main`), since the local branch `master` maps to preview by default. Confidence: 0.9
+- For already-running databases, prefers new SQL changes be separated into their own idempotent migration file rather than re-running the full `setup.sql` (which would re-execute already-applied statements). Confidence: 0.9
+- Wants superadmin actions to be invisible ("stealth mode") — superadmin activity should NOT be written to the audit log so regular admins cannot see what superadmin did; superadmin is meant to be "powerful". Role is checked fresh from the DB at write time so a demoted superadmin resumes normal logging. Confidence: 0.8
+- Does not use the Express backend — only the Cloudflare Worker (Pages Functions in `functions/`). Direct all backend changes to the worker; treat the Express `backend/` codebase as unused/legacy. Confidence: 0.9
+- Prefers to remove unused/dead code to keep the repo clean, deleting legacy artifacts (old Express backend, Docker/nginx files) once confirmed unused rather than leaving them around. Confidence: 0.8
+- Uses Supabase selfhosted (not Supabase cloud) as the database, alongside Cloudflare Pages + Worker hosting. Confidence: 0.7
+- Prefers automatic provisioning of user data on login — logging into HRMS should automatically create the user's related profile (e.g., daily-job/OKR profile) rather than requiring a separate manual setup step. Confidence: 0.7
+- Prefers to delete and cleanly rewrite a feature rather than incrementally patch it when the existing implementation no longer matches the desired behavior ("hapus aja, buat ulang"). Confidence: 0.6
+- Prefers keeping schema lean: stores small structured lists (e.g., an employee's job definitions) as a JSONB column on the existing entity (`users.primary_jobs`) instead of a separate relational table, avoiding joins and extra tables. Confidence: 0.7
+- Uses the ponytail skill (specifically `ponytail-audit`) for large code deletions and rewrites. Confidence: 0.6
+- Prefers explicit confirmation via a structured multiple-choice question dialog (ask_user_question) before making ambiguous design decisions during a rewrite, so the assistant doesn't guess business rules (e.g., how many primary jobs, qty vs nominal targets). Confidence: 0.7

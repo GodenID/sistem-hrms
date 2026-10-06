@@ -1,0 +1,21 @@
+{
+  "disabledSkills": [
+    "cavecrew",
+    "caveman",
+    "caveman-commit",
+    "caveman-compress",
+    "caveman-discover",
+    "caveman-evidence-review",
+    "caveman-explore",
+    "caveman-help",
+    "caveman-learn",
+    "caveman-manage",
+    "caveman-optimize",
+    "caveman-review",
+    "caveman-setup",
+    "caveman-stats",
+    "investigate-first",
+    "lean-build",
+    "migration"
+  ]
+}
