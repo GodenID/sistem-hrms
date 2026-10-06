@@ -58,7 +58,7 @@ Alternatif tanpa pg_dump: export per-tabel CSV dari Supabase SQL editor lalu
 
 **Opsi A — Docker Compose (disarankan):**
 1. Coolify → New Resource → Application → pilih repo ini.
-2. Build Pack: `Docker Compose`, file `docker-compose.yml` (root repo).
+2. Build Pack: `Docker Compose`, file `docker-compose.yaml` (root repo).
 3. **Domain**: pasang domain untuk service `api`, mis. `https://api-hrms.prasastigroup.id`.
 4. Lanjut ke Environment di bawah.
 
